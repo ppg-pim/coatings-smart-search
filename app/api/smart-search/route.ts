@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import OpenAI from 'openai'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Remove this - don't instantiate at module level
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY,
+// })
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,120 +18,81 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Step 1: Get your table schema (first time only, or cache this)
-    const { data: sampleData, error: schemaError } = await supabase
-      .from('products')
-      .select('*')
-      .limit(1)
+    // Initialize OpenAI inside the function (runtime)
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
 
-    if (schemaError) {
-      throw new Error(`Schema error: ${schemaError.message}`)
-    }
-
-    const columns = sampleData && sampleData.length > 0 
-      ? Object.keys(sampleData[0]) 
-      : []
-
-    // Step 2: Use ChatGPT to interpret the query
+    // Get AI interpretation
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4',
       messages: [
         {
           role: 'system',
-          content: `You are a database query assistant. Given a natural language query, convert it into a JSON object that describes how to filter a products database.
-
-Available columns: ${columns.join(', ')}
-
-Return a JSON object with this structure:
-{
-  "filters": [
-    {
-      "column": "column_name",
-      "operator": "eq" | "ilike" | "gt" | "lt" | "gte" | "lte",
-      "value": "search_value"
-    }
-  ],
-  "orderBy": {
-    "column": "column_name",
-    "ascending": true | false
-  },
-  "limit": number
-}
-
-For text searches, use "ilike" operator with % wildcards.
-If no specific filters are needed, return empty filters array to get all products.`
+          content: `You are a helpful assistant that interprets search queries for a coatings product database.
+Extract search criteria and return a JSON object with filters.
+Available fields: product_name, product_line, category, substrate, color, finish, application_method, cure_type, voc_level, features.
+Return format: { "filters": [{ "column": "field_name", "operator": "eq|ilike|contains", "value": "search_value" }] }`,
         },
         {
           role: 'user',
-          content: query
-        }
+          content: query,
+        },
       ],
-      response_format: { type: 'json_object' }
+      temperature: 0.3,
     })
 
-    const searchParams = JSON.parse(completion.choices[0].message.content || '{}')
+    const aiResponse = completion.choices[0].message.content
+    let filters = []
 
-    // Step 3: Build and execute Supabase query
-    let supabaseQuery = supabase.from('products').select('*')
-
-    // Apply filters
-    if (searchParams.filters && searchParams.filters.length > 0) {
-      searchParams.filters.forEach((filter: any) => {
-        const { column, operator, value } = filter
-        
-        switch (operator) {
-          case 'eq':
-            supabaseQuery = supabaseQuery.eq(column, value)
-            break
-          case 'ilike':
-            supabaseQuery = supabaseQuery.ilike(column, value)
-            break
-          case 'gt':
-            supabaseQuery = supabaseQuery.gt(column, value)
-            break
-          case 'lt':
-            supabaseQuery = supabaseQuery.lt(column, value)
-            break
-          case 'gte':
-            supabaseQuery = supabaseQuery.gte(column, value)
-            break
-          case 'lte':
-            supabaseQuery = supabaseQuery.lte(column, value)
-            break
-        }
-      })
+    try {
+      const parsed = JSON.parse(aiResponse || '{}')
+      filters = parsed.filters || []
+    } catch (e) {
+      console.error('Failed to parse AI response:', e)
     }
 
-    // Apply ordering
-    if (searchParams.orderBy) {
-      supabaseQuery = supabaseQuery.order(
-        searchParams.orderBy.column,
-        { ascending: searchParams.orderBy.ascending }
+    // Build Supabase query
+    let supabaseQuery: any = supabase
+      .from('products')
+      .select('*')
+
+    // Apply filters
+    for (const filter of filters) {
+      const { column, operator, value } = filter
+
+      switch (operator) {
+        case 'eq':
+          supabaseQuery = supabaseQuery.eq(column, value)
+          break
+        case 'ilike':
+          supabaseQuery = supabaseQuery.ilike(column, `%${value}%`)
+          break
+        case 'contains':
+          supabaseQuery = supabaseQuery.contains(column, [value])
+          break
+      }
+    }
+
+    const { data: products, error } = await supabaseQuery
+
+    if (error) {
+      console.error('Supabase error:', error)
+      return NextResponse.json(
+        { error: 'Database query failed', details: error.message },
+        { status: 500 }
       )
     }
 
-    // Apply limit
-    const limit = searchParams.limit || 20
-    supabaseQuery = supabaseQuery.limit(limit)
-
-    // Execute query
-    const { data, error } = await supabaseQuery
-
-    if (error) {
-      throw new Error(`Database error: ${error.message}`)
-    }
-
     return NextResponse.json({
-      success: true,
-      results: data,
-      count: data?.length || 0,
-      searchParams: searchParams
+      products: products || [],
+      filters: filters,
+      interpretation: aiResponse,
     })
-
   } catch (error: any) {
-    console.error('Smart search error:', error)
+    console.error('Search error:', error)
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: 'Search failed', details: error.message },
       { status: 500 }
     )
   }
