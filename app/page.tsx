@@ -578,58 +578,40 @@ const loadFilterOptions = async () => {
                   key={index}
                   className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
                 >
-                  {/* Card Header with SKU, Product Name, Description */}
-                  {Object.keys(header).length > 0 && (
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-6">
-                      {Object.entries(header).map(([key, value]) => {
-                        const lowerKey = key.toLowerCase()
-                        
-                        // SKU - Large and prominent
-                        if (lowerKey === 'sku') {
-                          return (
-                            <div key={key} className="mb-3">
-                              <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
-                                SKU
-                              </span>
-                              <div className="text-2xl font-bold mt-1" style={{ color: '#0078a9' }}>
-                                {formatValue(key, value)}
-                              </div>
-                            </div>
-                          )
-                        }
-                        
-                        // Product Name
-                        if (lowerKey.includes('name')) {
-                          return (
-                            <div key={key} className="mb-3">
-                              <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
-                                Product Name
-                              </span>
-                              <div className="text-xl font-semibold text-gray-900 mt-1">
-                                {formatValue(key, value)}
-                              </div>
-                            </div>
-                          )
-                        }
-                        
-                        // Description
-                        if (lowerKey.includes('description')) {
-                          return (
-                            <div key={key}>
-                              <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
-                                Description
-                              </span>
-                              <div className="text-sm text-gray-700 mt-1 leading-relaxed">
-                                {formatValue(key, value)}
-                              </div>
-                            </div>
-                          )
-                        }
-                        
-                        return null
-                      })}
-                    </div>
-                  )}
+        {/* Card Header with SKU, Product Name, Description */}
+        {Object.keys(header).length > 0 && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-6">
+            {/* Render SKU first */}
+            {Object.entries(header).filter(([key]) => key.toLowerCase() === 'sku').map(([key, value]) => (
+              <div key={key} className="mb-3">
+                <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">SKU</span>
+                <div className="text-2xl font-bold mt-1" style={{ color: '#0078a9' }}>
+                  {formatValue(key, value)}
+                </div>
+              </div>
+            ))}
+            
+            {/* Render Product Name second */}
+            {Object.entries(header).filter(([key]) => key.toLowerCase().includes('name')).map(([key, value]) => (
+              <div key={key} className="mb-3">
+                <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Product Name</span>
+                <div className="text-xl font-semibold text-gray-900 mt-1">
+                  {formatValue(key, value)}
+                </div>
+              </div>
+            ))}
+            
+            {/* Render Description last */}
+            {Object.entries(header).filter(([key]) => key.toLowerCase().includes('description')).map(([key, value]) => (
+              <div key={key}>
+                <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Description</span>
+                <div className="text-sm text-gray-700 mt-1 leading-relaxed">
+                  {formatValue(key, value)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
                   {/* Card Body with all other attributes */}
                   {Object.keys(other).length > 0 && (
