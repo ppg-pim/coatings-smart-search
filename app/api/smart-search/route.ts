@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import OpenAI from 'openai';
+import OpenAI from 'openai'
+
+// Initialize OpenAI client outside the handler
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
 
 type ProductRecord = Record<string, any>
 
@@ -268,11 +273,19 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
 }
 
 export async function POST(request: NextRequest) {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
   try {
+    // Check if OpenAI API key is configured
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('❌ OPENAI_API_KEY is not configured')
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'OpenAI API key is not configured. Please add OPENAI_API_KEY to your environment variables.'
+        },
+        { status: 500 }
+      )
+    }
+
     const body = await request.json()
     const { query, filters, getFilterOptions } = body
 
@@ -364,7 +377,7 @@ export async function POST(request: NextRequest) {
             productModels: [] 
           },
           error: error.message
-        })
+        }, { status: 200 }) // Return 200 even on error for filter options
       }
     }
 
@@ -616,25 +629,35 @@ CRITICAL RULES:
       if (searchTerms.size > 0) {
         const fallbackFilters: string[] = []
         Array.from(searchTerms).forEach(term => {
-          fallbackFilters.push(`searchable_text.ilike.%${term}%`)
-          fallbackFilters.push(`sku.ilike.%${term}%`)
-          fallbackFilters.push(`product_name.ilike.%${term}%`)
-          fallbackFilters.push(`name.ilike.%${term}%`)
+          if (columns.includes('searchable_text')) {
+            fallbackFilters.push(`searchable_text.ilike.%${term}%`)
+          }
+          if (columns.includes('sku')) {
+            fallbackFilters.push(`sku.ilike.%${term}%`)
+          }
+          if (columns.includes('product_name')) {
+            fallbackFilters.push(`product_name.ilike.%${term}%`)
+          }
+          if (columns.includes('name')) {
+            fallbackFilters.push(`name.ilike.%${term}%`)
+          }
         })
         
-        let fallbackQuery = supabase
-          .from('coatings')
-          .select('*')
-          .or(fallbackFilters.join(','))
-          .limit(1000)
-        
-        fallbackQuery = applyUserFilters(fallbackQuery, filters, columns, [])
-        
-        const fallbackResult = await fallbackQuery
-        
-        if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
-          console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
-          data = filterProductsInMemory(fallbackResult.data, filters)
+        if (fallbackFilters.length > 0) {
+          let fallbackQuery = supabase
+            .from('coatings')
+            .select('*')
+            .or(fallbackFilters.join(','))
+            .limit(1000)
+          
+          fallbackQuery = applyUserFilters(fallbackQuery, filters, columns, [])
+          
+          const fallbackResult = await fallbackQuery
+          
+          if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
+            console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
+            data = filterProductsInMemory(fallbackResult.data, filters)
+          }
         }
       }
     }
