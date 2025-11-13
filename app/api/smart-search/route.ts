@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import OpenAI from 'openai'
+import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+export async function POST(req: Request) {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY, // This runs at request time
+  });
 
 type ProductRecord = Record<string, any>
 
