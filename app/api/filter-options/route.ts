@@ -1,178 +1,166 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-// Helper function to extract filter values from coatings
-function extractFilterOptions(coatings: any[]) {
-  const families = new Set<string>()
-  const productTypes = new Set<string>()
-  const productModels = new Set<string>()
-
-  coatings?.forEach((coating: any) => {
-    // Extract family
-    const familyValue = coating.family || coating.Family || coating.product_family || coating.productFamily
-    if (familyValue && String(familyValue).trim()) {
-      families.add(String(familyValue).trim())
+// Helper function to safely get string value
+function getStringValue(obj: any, ...keys: string[]): string | null {
+  for (const key of keys) {
+    if (obj[key] && String(obj[key]).trim()) {
+      return String(obj[key]).trim()
     }
-
-    // Extract product type
-    const typeValue = coating.product_type || coating.productType || coating.type || coating.Type || coating.category || coating.Category
-    if (typeValue && String(typeValue).trim()) {
-      productTypes.add(String(typeValue).trim())
-    }
-
-    // Extract product model
-    const modelValue = coating.product_model || coating.productModel || coating.model || coating.Model
-    if (modelValue && String(modelValue).trim()) {
-      productModels.add(String(modelValue).trim())
-    }
-
-    // Also check in all_attributes
-    if (coating.all_attributes) {
-      try {
-        let attributes: any = typeof coating.all_attributes === 'string' 
-          ? JSON.parse(coating.all_attributes) 
-          : coating.all_attributes
-
-        const attrFamily = attributes.family || attributes.Family || attributes.product_family || attributes.productFamily
-        if (attrFamily && String(attrFamily).trim()) {
-          families.add(String(attrFamily).trim())
-        }
-
-        const attrType = attributes.product_type || attributes.productType || attributes.type || attributes.Type
-        if (attrType && String(attrType).trim()) {
-          productTypes.add(String(attrType).trim())
-        }
-
-        const attrModel = attributes.product_model || attributes.productModel || attributes.model || attributes.Model
-        if (attrModel && String(attrModel).trim()) {
-          productModels.add(String(attrModel).trim())
-        }
-      } catch (e) {
-        // Ignore parsing errors
-      }
-    }
-  })
-
-  return {
-    families: Array.from(families).sort(),
-    productTypes: Array.from(productTypes).sort(),
-    productModels: Array.from(productModels).sort()
   }
+  return null
 }
 
 // Helper to get field value from coating
 function getFieldValue(coating: any, fieldType: 'family' | 'type' | 'model'): string | null {
   let value = null
 
-  if (fieldType === 'family') {
-    value = coating.family || coating.Family || coating.product_family || coating.productFamily
-    if (!value && coating.all_attributes) {
-      const attr = typeof coating.all_attributes === 'string' ? JSON.parse(coating.all_attributes) : coating.all_attributes
-      value = attr?.family || attr?.Family || attr?.product_family || attr?.productFamily
+  try {
+    if (fieldType === 'family') {
+      value = getStringValue(coating, 'family', 'Family', 'product_family', 'productFamily')
+      
+      if (!value && coating.all_attributes) {
+        const attr = typeof coating.all_attributes === 'string' 
+          ? JSON.parse(coating.all_attributes) 
+          : coating.all_attributes
+        value = getStringValue(attr, 'family', 'Family', 'product_family', 'productFamily')
+      }
+    } else if (fieldType === 'type') {
+      value = getStringValue(coating, 'product_type', 'productType', 'type', 'Type', 'category', 'Category')
+      
+      if (!value && coating.all_attributes) {
+        const attr = typeof coating.all_attributes === 'string' 
+          ? JSON.parse(coating.all_attributes) 
+          : coating.all_attributes
+        value = getStringValue(attr, 'product_type', 'productType', 'type', 'Type', 'category', 'Category')
+      }
+    } else if (fieldType === 'model') {
+      value = getStringValue(coating, 'product_model', 'productModel', 'model', 'Model')
+      
+      if (!value && coating.all_attributes) {
+        const attr = typeof coating.all_attributes === 'string' 
+          ? JSON.parse(coating.all_attributes) 
+          : coating.all_attributes
+        value = getStringValue(attr, 'product_model', 'productModel', 'model', 'Model')
+      }
     }
-  } else if (fieldType === 'type') {
-    value = coating.product_type || coating.productType || coating.type || coating.Type || coating.category || coating.Category
-    if (!value && coating.all_attributes) {
-      const attr = typeof coating.all_attributes === 'string' ? JSON.parse(coating.all_attributes) : coating.all_attributes
-      value = attr?.product_type || attr?.productType || attr?.type || attr?.Type
-    }
-  } else if (fieldType === 'model') {
-    value = coating.product_model || coating.productModel || coating.model || coating.Model
-    if (!value && coating.all_attributes) {
-      const attr = typeof coating.all_attributes === 'string' ? JSON.parse(coating.all_attributes) : coating.all_attributes
-      value = attr?.product_model || attr?.productModel || attr?.model || attr?.Model
-    }
+  } catch (e) {
+    console.error('Error extracting field value:', e)
   }
 
-  return value ? String(value).trim() : null
+  return value
 }
 
-// Smart filtering: only filter by the fields that are selected
+// Extract unique values for each filter type
+function extractFilterOptions(coatings: any[]) {
+  const families = new Set<string>()
+  const productTypes = new Set<string>()
+  const productModels = new Set<string>()
+
+  console.log(`🔍 Extracting filter options from ${coatings.length} coatings...`)
+
+  coatings.forEach((coating, index) => {
+    // Debug first coating
+    if (index === 0) {
+      console.log('📋 First coating sample:', {
+        id: coating.id,
+        name: coating.name || coating.product_name,
+        fields: Object.keys(coating).slice(0, 20)
+      })
+    }
+
+    const family = getFieldValue(coating, 'family')
+    const type = getFieldValue(coating, 'type')
+    const model = getFieldValue(coating, 'model')
+
+    if (family) families.add(family)
+    if (type) productTypes.add(type)
+    if (model) productModels.add(model)
+  })
+
+  const result = {
+    families: Array.from(families).sort(),
+    productTypes: Array.from(productTypes).sort(),
+    productModels: Array.from(productModels).sort()
+  }
+
+  console.log('✅ Extracted options:', {
+    families: result.families.length,
+    productTypes: result.productTypes.length,
+    productModels: result.productModels.length
+  })
+
+  // Log samples
+  if (result.families.length > 0) {
+    console.log('📦 Sample families:', result.families.slice(0, 10))
+  }
+  if (result.productTypes.length > 0) {
+    console.log('📦 Sample types:', result.productTypes.slice(0, 10))
+  }
+  if (result.productModels.length > 0) {
+    console.log('📦 Sample models:', result.productModels.slice(0, 10))
+  }
+
+  return result
+}
+
+// Smart filtering
 function filterCoatings(coatings: any[], filters: any) {
   if (!filters || (!filters.family && !filters.productType && !filters.productModel)) {
     return coatings
   }
 
   return coatings.filter(coating => {
-    let matches = true
-
-    // Check family if selected
     if (filters.family) {
       const familyValue = getFieldValue(coating, 'family')
-      if (familyValue !== filters.family) {
-        matches = false
-      }
+      if (familyValue !== filters.family) return false
     }
 
-    // Check product type if selected
     if (filters.productType) {
       const typeValue = getFieldValue(coating, 'type')
-      if (typeValue !== filters.productType) {
-        matches = false
-      }
+      if (typeValue !== filters.productType) return false
     }
 
-    // Check product model if selected
     if (filters.productModel) {
       const modelValue = getFieldValue(coating, 'model')
-      if (modelValue !== filters.productModel) {
-        matches = false
-      }
+      if (modelValue !== filters.productModel) return false
     }
 
-    return matches
+    return true
   })
 }
 
-// POST handler - with dynamic filtering based on current selections
-export async function POST(request: NextRequest) {
+// GET handler - initial load
+export async function GET() {
   try {
-    const body = await request.json()
-    const { currentFilters } = body
+    console.log('🚀 GET /api/filter-options - Loading initial filter options...')
 
-    console.log('📋 Loading filter options with current filters:', currentFilters)
-
-    // Fetch all coatings
-    const { data: coatings, error } = await supabase
+    // Try with a smaller limit first to see if it works
+    const { data: coatings, error, count } = await supabase
       .from('coatings')
-      .select('*')
-      .limit(10000)
+      .select('*', { count: 'exact' })
+      .limit(1000) // Start with 1000 instead of 10000
 
     if (error) {
+      console.error('❌ Supabase error:', error)
       throw new Error(`Database error: ${error.message}`)
     }
 
-    console.log(`📦 Fetched ${coatings?.length || 0} total coatings`)
+    console.log(`📦 Fetched ${coatings?.length || 0} coatings (total in DB: ${count})`)
 
-    // Apply filters to get relevant subset
-    const filteredCoatings = filterCoatings(coatings || [], currentFilters)
-    
-    console.log(`🔍 After filtering: ${filteredCoatings.length} coatings match criteria`)
-
-    // Extract filter options from filtered data
-    const { families, productTypes, productModels } = extractFilterOptions(filteredCoatings)
-
-    console.log(`✅ Available options:`, {
-      families: families.length,
-      productTypes: productTypes.length,
-      productModels: productModels.length
-    })
-
-    // Debug: log first few values
-    console.log('Sample families:', families.slice(0, 5))
-    console.log('Sample types:', productTypes.slice(0, 5))
-    console.log('Sample models:', productModels.slice(0, 5))
+    const { families, productTypes, productModels } = extractFilterOptions(coatings || [])
 
     return NextResponse.json({
       success: true,
       families,
       productTypes,
       productModels,
-      totalCoatings: filteredCoatings.length
+      totalCoatings: coatings?.length || 0,
+      totalInDB: count
     })
 
   } catch (error: any) {
-    console.error('❌ Filter options error:', error)
+    console.error('❌ GET filter-options error:', error)
     
     return NextResponse.json(
       { 
@@ -188,41 +176,41 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET handler - initial load without filters
-export async function GET() {
+// POST handler - with filters
+export async function POST(request: NextRequest) {
   try {
-    console.log('📋 Loading initial filter options...')
+    const body = await request.json()
+    const { currentFilters } = body
+
+    console.log('🚀 POST /api/filter-options - Current filters:', currentFilters)
 
     const { data: coatings, error } = await supabase
       .from('coatings')
       .select('*')
-      .limit(10000)
+      .limit(1000)
 
     if (error) {
+      console.error('❌ Supabase error:', error)
       throw new Error(`Database error: ${error.message}`)
     }
 
     console.log(`📦 Fetched ${coatings?.length || 0} coatings`)
 
-    // Extract filter options
-    const { families, productTypes, productModels } = extractFilterOptions(coatings || [])
+    const filteredCoatings = filterCoatings(coatings || [], currentFilters)
+    console.log(`🔍 After filtering: ${filteredCoatings.length} coatings`)
 
-    console.log(`✅ Initial options:`, {
-      families: families.length,
-      productTypes: productTypes.length,
-      productModels: productModels.length
-    })
+    const { families, productTypes, productModels } = extractFilterOptions(filteredCoatings)
 
     return NextResponse.json({
       success: true,
       families,
       productTypes,
       productModels,
-      totalCoatings: coatings?.length || 0
+      totalCoatings: filteredCoatings.length
     })
 
   } catch (error: any) {
-    console.error('❌ Filter options error:', error)
+    console.error('❌ POST filter-options error:', error)
     
     return NextResponse.json(
       { 
