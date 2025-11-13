@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import OpenAI from 'openai'
 
-// ✅ Initialize OpenAI at module level (OUTSIDE the function)
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
-
 type ProductRecord = Record<string, any>
+
+// ✅ Lazy initialization - only create when needed
+let openaiInstance: OpenAI | null = null
+
+function getOpenAI(): OpenAI {
+  if (!openaiInstance) {
+    openaiInstance = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+  }
+  return openaiInstance
+}
 
 // Enhanced HTML stripping with comprehensive entity handling
 function stripHtml(html: string): string {
@@ -216,7 +223,7 @@ function applyUserFilters(dbQuery: any, filters: any, columns: string[], allProd
     }
   }
 
-  // For product model filter (changed from specification)
+  // For product model filter
   if (filters.productModel) {
     const modelColumns = ['product_model', 'productModel', 'model', 'Model'].filter(col => columns.includes(col))
     
@@ -258,7 +265,7 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
       }
     }
 
-    // Check product model (changed from specification)
+    // Check product model
     if (filters.productModel) {
       const modelValue = product.product_model || product.productModel || product.model || product.Model
       const attrModel = product.all_attributes?.product_model || product.all_attributes?.model
@@ -273,7 +280,6 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
 }
 
 export async function POST(request: NextRequest) {
-  // ❌ DON'T initialize OpenAI here - it's already initialized at the top
   try {
     const body = await request.json()
     const { query, filters, getFilterOptions } = body
@@ -409,6 +415,9 @@ export async function POST(request: NextRequest) {
     })
 
     console.log('📊 Available columns:', columns.length)
+
+    // ✅ Get OpenAI instance lazily
+    const openai = getOpenAI()
 
     // Step 2: Use GPT-4o-mini to understand the query
     const completion = await openai.chat.completions.create({
