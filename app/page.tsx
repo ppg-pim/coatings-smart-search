@@ -137,36 +137,38 @@ const loadFilterOptions = async () => {
 
   const hasActiveFilters = selectedFamily || selectedProductType || selectedProductModel
 
+  // Check if value is empty
+  const isEmpty = (value: any): boolean => {
+    if (value === null || value === undefined) return true
+    if (typeof value === 'string' && value.trim() === '') return true
+    if (Array.isArray(value) && value.length === 0) return true
+    return false
+  }
+
   // Group attributes by category for better display
   const groupAttributes = (product: any) => {
-    const priorityFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
-    const footerFields = ['created_at', 'updated_at', 'createdat', 'updatedat']
-    const searchableFields = ['searchable_text', 'searchabletext', 'searchable']
+    const headerFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
+    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable']
     
-    const priority: any = {}
-    const footer: any = {}
-    const searchable: any = {}
+    const header: any = {}
     const other: any = {}
     const seen = new Set<string>()
 
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
-      if (seen.has(lowerKey)) return
+      // Skip if already seen, excluded, or empty
+      if (seen.has(lowerKey) || excludeFields.includes(lowerKey) || isEmpty(value)) return
       seen.add(lowerKey)
       
-      if (priorityFields.includes(lowerKey)) {
-        priority[key] = value
-      } else if (footerFields.includes(lowerKey)) {
-        footer[key] = value
-      } else if (searchableFields.includes(lowerKey)) {
-        searchable[key] = value
+      if (headerFields.includes(lowerKey)) {
+        header[key] = value
       } else {
         other[key] = value
       }
     })
 
-    return { priority, other, searchable, footer }
+    return { header, other }
   }
 
   // Format field name for display
@@ -206,11 +208,12 @@ const loadFilterOptions = async () => {
   const getAllKeys = (products: any[]) => {
     const allKeys = new Set<string>()
     const seenLowerKeys = new Set<string>()
+    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext']
     
     products.forEach(product => {
       Object.keys(product).forEach(key => {
         const lowerKey = key.toLowerCase()
-        if (!seenLowerKeys.has(lowerKey)) {
+        if (!seenLowerKeys.has(lowerKey) && !excludeFields.includes(lowerKey) && !isEmpty(product[key])) {
           allKeys.add(key)
           seenLowerKeys.add(lowerKey)
         }
@@ -234,14 +237,10 @@ const loadFilterOptions = async () => {
     const products = comparisonData.products
     const allKeys = getAllKeys(products)
     
-    const priorityFields = ['sku', 'product_name', 'productname', 'name']
-    const excludeFields = ['created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext']
+    const priorityFields = ['sku', 'product_name', 'productname', 'name', 'description', 'product_description']
     
     const priority = allKeys.filter(k => priorityFields.includes(k.toLowerCase()))
-    const technical = allKeys.filter(k => 
-      !priorityFields.includes(k.toLowerCase()) && 
-      !excludeFields.includes(k.toLowerCase())
-    )
+    const technical = allKeys.filter(k => !priorityFields.includes(k.toLowerCase()))
 
     return (
       <div className="mb-8">
@@ -297,38 +296,42 @@ const loadFilterOptions = async () => {
                   )
                 })}
 
-                <tr className="bg-gray-100">
-                  <td colSpan={products.length + 1} className="px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
-                    Technical Specifications
-                  </td>
-                </tr>
-
-                {technical.map((key) => {
-                  const different = isDifferent(key, products)
-                  return (
-                    <tr 
-                      key={key} 
-                      className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
-                    >
-                      <td className="px-6 py-3 text-sm text-gray-700 sticky left-0 bg-white z-10">
-                        <div className="flex items-center gap-2">
-                          {formatFieldName(key)}
-                          {different && (
-                            <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full" title="Different values"></span>
-                          )}
-                        </div>
+                {technical.length > 0 && (
+                  <>
+                    <tr className="bg-gray-100">
+                      <td colSpan={products.length + 1} className="px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
+                        Technical Specifications
                       </td>
-                      {products.map((product: any, idx: number) => (
-                        <td 
-                          key={idx} 
-                          className={`px-6 py-3 text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
-                        >
-                          {formatValue(key, product[key]) || '-'}
-                        </td>
-                      ))}
                     </tr>
-                  )
-                })}
+
+                    {technical.map((key) => {
+                      const different = isDifferent(key, products)
+                      return (
+                        <tr 
+                          key={key} 
+                          className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
+                        >
+                          <td className="px-6 py-3 text-sm text-gray-700 sticky left-0 bg-white z-10">
+                            <div className="flex items-center gap-2">
+                              {formatFieldName(key)}
+                              {different && (
+                                <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full" title="Different values"></span>
+                              )}
+                            </div>
+                          </td>
+                          {products.map((product: any, idx: number) => (
+                            <td 
+                              key={idx} 
+                              className={`px-6 py-3 text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
+                            >
+                              {formatValue(key, product[key]) || '-'}
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
+                  </>
+                )}
               </tbody>
             </table>
           </div>
@@ -568,83 +571,87 @@ const loadFilterOptions = async () => {
 
           <div className="space-y-6">
             {results.map((product, index) => {
-              const { priority, other, searchable, footer } = groupAttributes(product)
+              const { header, other } = groupAttributes(product)
               
               return (
                 <div
                   key={index}
-                  className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-shadow"
+                  className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
                 >
-                  {Object.keys(priority).length > 0 && (
-                    <div className="mb-4 pb-4 border-b border-gray-200">
-                      <div className="space-y-3">
-                        {Object.entries(priority).map(([key, value]) => (
-                          <div key={key}>
-                            <span 
-                              className="font-semibold text-sm uppercase tracking-wide"
-                              style={{ color: '#0078a9' }}
-                            >
-                              {formatFieldName(key)}:
-                            </span>{' '}
-                            <span className="text-gray-900">
-                              {formatValue(key, value)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                  {/* Card Header with SKU, Product Name, Description */}
+                  {Object.keys(header).length > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-6">
+                      {Object.entries(header).map(([key, value]) => {
+                        const lowerKey = key.toLowerCase()
+                        
+                        // SKU - Large and prominent
+                        if (lowerKey === 'sku') {
+                          return (
+                            <div key={key} className="mb-3">
+                              <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
+                                SKU
+                              </span>
+                              <div className="text-2xl font-bold mt-1" style={{ color: '#0078a9' }}>
+                                {formatValue(key, value)}
+                              </div>
+                            </div>
+                          )
+                        }
+                        
+                        // Product Name
+                        if (lowerKey.includes('name')) {
+                          return (
+                            <div key={key} className="mb-3">
+                              <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
+                                Product Name
+                              </span>
+                              <div className="text-xl font-semibold text-gray-900 mt-1">
+                                {formatValue(key, value)}
+                              </div>
+                            </div>
+                          )
+                        }
+                        
+                        // Description
+                        if (lowerKey.includes('description')) {
+                          return (
+                            <div key={key}>
+                              <span className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
+                                Description
+                              </span>
+                              <div className="text-sm text-gray-700 mt-1 leading-relaxed">
+                                {formatValue(key, value)}
+                              </div>
+                            </div>
+                          )
+                        }
+                        
+                        return null
+                      })}
                     </div>
                   )}
 
+                  {/* Card Body with all other attributes */}
                   {Object.keys(other).length > 0 && (
-                    <div className="mb-4">
+                    <div className="p-6">
                       <h3 
-                        className="font-semibold mb-3 text-sm uppercase tracking-wide"
+                        className="font-semibold mb-4 text-sm uppercase tracking-wide flex items-center"
                         style={{ color: '#0078a9' }}
                       >
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
                         Technical Specifications
                       </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-sm">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                         {Object.entries(other).map(([key, value]) => (
-                          <div key={key} className="flex flex-col">
-                            <span className="text-gray-600 text-xs">
+                          <div key={key} className="flex flex-col border-l-2 border-gray-200 pl-3">
+                            <span className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">
                               {formatFieldName(key)}
                             </span>
-                            <span className="text-gray-900 font-medium">
+                            <span className="text-sm text-gray-900 font-medium">
                               {formatValue(key, value)}
                             </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {Object.keys(searchable).length > 0 && (
-                    <div className="mb-4 pb-4 border-b border-gray-200">
-                      {Object.entries(searchable).map(([key, value]) => (
-                        <div key={key}>
-                          <span 
-                            className="font-semibold text-sm uppercase tracking-wide"
-                            style={{ color: '#0078a9' }}
-                          >
-                            {formatFieldName(key)}:
-                          </span>
-                          <div className="mt-2 text-gray-700 text-sm bg-gray-50 p-3 rounded">
-                            {formatValue(key, value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {Object.keys(footer).length > 0 && (
-                    <div className="pt-4 border-t border-gray-200">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-500">
-                        {Object.entries(footer).map(([key, value]) => (
-                          <div key={key}>
-                            <span className="font-medium">
-                              {formatFieldName(key)}:
-                            </span>{' '}
-                            {formatValue(key, value)}
                           </div>
                         ))}
                       </div>
