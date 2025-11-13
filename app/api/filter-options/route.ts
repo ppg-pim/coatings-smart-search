@@ -60,70 +60,67 @@ function extractFilterOptions(coatings: any[]) {
   }
 }
 
-// Helper function to apply filters to query
-function applyFiltersToQuery(query: any, filters: any) {
-  if (!filters) return query
+// Helper to get field value from coating
+function getFieldValue(coating: any, fieldType: 'family' | 'type' | 'model'): string | null {
+  let value = null
 
-  // Apply family filter
-  if (filters.family) {
-    const familyColumns = ['family', 'Family', 'product_family', 'productFamily']
-    const orConditions = familyColumns.map(col => `${col}.eq.${filters.family}`).join(',')
-    query = query.or(orConditions)
+  if (fieldType === 'family') {
+    value = coating.family || coating.Family || coating.product_family || coating.productFamily
+    if (!value && coating.all_attributes) {
+      const attr = typeof coating.all_attributes === 'string' ? JSON.parse(coating.all_attributes) : coating.all_attributes
+      value = attr?.family || attr?.Family || attr?.product_family || attr?.productFamily
+    }
+  } else if (fieldType === 'type') {
+    value = coating.product_type || coating.productType || coating.type || coating.Type || coating.category || coating.Category
+    if (!value && coating.all_attributes) {
+      const attr = typeof coating.all_attributes === 'string' ? JSON.parse(coating.all_attributes) : coating.all_attributes
+      value = attr?.product_type || attr?.productType || attr?.type || attr?.Type
+    }
+  } else if (fieldType === 'model') {
+    value = coating.product_model || coating.productModel || coating.model || coating.Model
+    if (!value && coating.all_attributes) {
+      const attr = typeof coating.all_attributes === 'string' ? JSON.parse(coating.all_attributes) : coating.all_attributes
+      value = attr?.product_model || attr?.productModel || attr?.model || attr?.Model
+    }
   }
 
-  // Apply product type filter
-  if (filters.productType) {
-    const typeColumns = ['product_type', 'productType', 'type', 'Type', 'category', 'Category']
-    const orConditions = typeColumns.map(col => `${col}.eq.${filters.productType}`).join(',')
-    query = query.or(orConditions)
-  }
-
-  // Apply product model filter
-  if (filters.productModel) {
-    const modelColumns = ['product_model', 'productModel', 'model', 'Model']
-    const orConditions = modelColumns.map(col => `${col}.eq.${filters.productModel}`).join(',')
-    query = query.or(orConditions)
-  }
-
-  return query
+  return value ? String(value).trim() : null
 }
 
-// Helper to filter in memory (fallback)
-function filterInMemory(coatings: any[], filters: any) {
-  if (!filters) return coatings
+// Smart filtering: only filter by the fields that are selected
+function filterCoatings(coatings: any[], filters: any) {
+  if (!filters || (!filters.family && !filters.productType && !filters.productModel)) {
+    return coatings
+  }
 
   return coatings.filter(coating => {
-    // Check family
+    let matches = true
+
+    // Check family if selected
     if (filters.family) {
-      const familyValue = coating.family || coating.Family || coating.product_family || coating.productFamily
-      const attrFamily = coating.all_attributes?.family || coating.all_attributes?.Family
-      
-      if (familyValue !== filters.family && attrFamily !== filters.family) {
-        return false
+      const familyValue = getFieldValue(coating, 'family')
+      if (familyValue !== filters.family) {
+        matches = false
       }
     }
 
-    // Check product type
+    // Check product type if selected
     if (filters.productType) {
-      const typeValue = coating.product_type || coating.productType || coating.type || coating.Type || coating.category || coating.Category
-      const attrType = coating.all_attributes?.product_type || coating.all_attributes?.type
-      
-      if (typeValue !== filters.productType && attrType !== filters.productType) {
-        return false
+      const typeValue = getFieldValue(coating, 'type')
+      if (typeValue !== filters.productType) {
+        matches = false
       }
     }
 
-    // Check product model
+    // Check product model if selected
     if (filters.productModel) {
-      const modelValue = coating.product_model || coating.productModel || coating.model || coating.Model
-      const attrModel = coating.all_attributes?.product_model || coating.all_attributes?.model
-      
-      if (modelValue !== filters.productModel && attrModel !== filters.productModel) {
-        return false
+      const modelValue = getFieldValue(coating, 'model')
+      if (modelValue !== filters.productModel) {
+        matches = false
       }
     }
 
-    return true
+    return matches
   })
 }
 
@@ -145,17 +142,26 @@ export async function POST(request: NextRequest) {
       throw new Error(`Database error: ${error.message}`)
     }
 
-    console.log(`📦 Fetched ${coatings?.length || 0} coatings`)
+    console.log(`📦 Fetched ${coatings?.length || 0} total coatings`)
 
-    // Apply filters in memory to get relevant subset
-    const filteredCoatings = filterInMemory(coatings || [], currentFilters)
+    // Apply filters to get relevant subset
+    const filteredCoatings = filterCoatings(coatings || [], currentFilters)
     
-    console.log(`🔍 After filtering: ${filteredCoatings.length} coatings`)
+    console.log(`🔍 After filtering: ${filteredCoatings.length} coatings match criteria`)
 
     // Extract filter options from filtered data
     const { families, productTypes, productModels } = extractFilterOptions(filteredCoatings)
 
-    console.log(`✅ Found ${families.length} families, ${productTypes.length} product types, ${productModels.length} product models`)
+    console.log(`✅ Available options:`, {
+      families: families.length,
+      productTypes: productTypes.length,
+      productModels: productModels.length
+    })
+
+    // Debug: log first few values
+    console.log('Sample families:', families.slice(0, 5))
+    console.log('Sample types:', productTypes.slice(0, 5))
+    console.log('Sample models:', productModels.slice(0, 5))
 
     return NextResponse.json({
       success: true,
@@ -201,7 +207,11 @@ export async function GET() {
     // Extract filter options
     const { families, productTypes, productModels } = extractFilterOptions(coatings || [])
 
-    console.log(`✅ Found ${families.length} families, ${productTypes.length} product types, ${productModels.length} product models`)
+    console.log(`✅ Initial options:`, {
+      families: families.length,
+      productTypes: productTypes.length,
+      productModels: productModels.length
+    })
 
     return NextResponse.json({
       success: true,
