@@ -22,33 +22,47 @@ export default function Home() {
   const [productModelOptions, setProductModelOptions] = useState<string[]>([])
   const [loadingFilters, setLoadingFilters] = useState(true)
 
-  // Load filter options on mount - inline version
+  // Load filter options on mount
   useEffect(() => {
-    loadFilterOptionsInline()
+    loadFilterOptions()
   }, [])
 
-  const loadFilterOptionsInline = async () => {
+  // Reload filter options when any filter changes
+  useEffect(() => {
+    if (!loadingFilters) {
+      loadFilterOptions()
+    }
+  }, [selectedFamily, selectedProductType, selectedProductModel])
+
+  const loadFilterOptions = async () => {
     setLoadingFilters(true)
     try {
-      // Call the smart-search API with a special flag to get filter options
-      const response = await fetch('/api/smart-search', {
+      // Build current filters object
+      const currentFilters: any = {}
+      if (selectedFamily) currentFilters.family = selectedFamily
+      if (selectedProductType) currentFilters.productType = selectedProductType
+      if (selectedProductModel) currentFilters.productModel = selectedProductModel
+
+      // Call the filter-options API with POST to send current filters
+      const response = await fetch('/api/filter-options', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          query: '__GET_FILTER_OPTIONS__',
-          getFilterOptions: true
-        }),
+        body: JSON.stringify({ currentFilters }),
       })
       
       if (response.ok) {
         const data = await response.json()
-        if (data.filterOptions) {
-          setFamilyOptions(data.filterOptions.families || [])
-          setProductTypeOptions(data.filterOptions.productTypes || [])
-          setProductModelOptions(data.filterOptions.productModels || [])
-          console.log('✅ Loaded filter options:', data.filterOptions)
+        if (data.success) {
+          setFamilyOptions(data.families || [])
+          setProductTypeOptions(data.productTypes || [])
+          setProductModelOptions(data.productModels || [])
+          console.log('✅ Loaded filter options:', {
+            families: data.families?.length,
+            types: data.productTypes?.length,
+            models: data.productModels?.length
+          })
         }
       } else {
         console.error('Failed to load filter options:', response.status)
@@ -330,7 +344,7 @@ export default function Home() {
     <main className="min-h-screen p-8 max-w-7xl mx-auto bg-gray-50">
       <div className="bg-white rounded-lg shadow-sm p-8 mb-8">
         <h1 className="text-4xl font-bold mb-2 text-center" style={{ color: '#0078a9' }}>
-          Smart Coatings Search
+          Coatings Smart Search
         </h1>
         <p className="text-center text-gray-600 mb-8">
           Search coatings using natural language
@@ -380,7 +394,7 @@ export default function Home() {
             <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold" style={{ color: '#0078a9' }}>
-                  Filter Options {loadingFilters && <span className="text-sm font-normal text-gray-500">(Loading...)</span>}
+                  Filter Options {loadingFilters && <span className="text-sm font-normal text-gray-500">(Updating...)</span>}
                 </h3>
                 {hasActiveFilters && (
                   <button
