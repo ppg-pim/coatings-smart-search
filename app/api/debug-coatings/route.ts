@@ -3,69 +3,57 @@ import { supabase } from '@/lib/supabase'
 
 export async function GET() {
   try {
-    // Fetch first 10 coatings to inspect structure
-    const { data: coatings, error } = await supabase
+    console.log('=== COATING STRUCTURE DEBUG ===')
+    
+    // Try different query approaches
+    const { data: coatings1, error: error1, count } = await supabase
+      .from('coatings')
+      .select('*', { count: 'exact' })
+      .limit(5)
+
+    console.log('Query 1 - Basic select:')
+    console.log('  Count:', count)
+    console.log('  Fetched:', coatings1?.length || 0)
+    console.log('  Error:', error1)
+
+    if (coatings1 && coatings1.length > 0) {
+      console.log('  First coating keys:', Object.keys(coatings1[0]))
+      console.log('  First coating sample:', JSON.stringify(coatings1[0], null, 2).slice(0, 500))
+    }
+
+    // Try without count
+    const { data: coatings2, error: error2 } = await supabase
       .from('coatings')
       .select('*')
-      .limit(10)
+      .limit(5)
 
-    if (error) {
-      throw new Error(`Database error: ${error.message}`)
-    }
+    console.log('\nQuery 2 - Without count:')
+    console.log('  Fetched:', coatings2?.length || 0)
+    console.log('  Error:', error2)
 
-    console.log('=== COATING STRUCTURE DEBUG ===')
-    console.log('Total coatings fetched:', coatings?.length)
-    
-    if (coatings && coatings.length > 0) {
-      console.log('\n=== FIRST COATING ===')
-      console.log(JSON.stringify(coatings[0], null, 2))
-      
-      console.log('\n=== ALL FIELD NAMES ===')
-      console.log(Object.keys(coatings[0]))
-      
-      // Check for family fields
-      console.log('\n=== FAMILY FIELDS ===')
-      const firstCoating = coatings[0]
-      console.log('family:', firstCoating.family)
-      console.log('Family:', firstCoating.Family)
-      console.log('product_family:', firstCoating.product_family)
-      console.log('productFamily:', firstCoating.productFamily)
-      
-      // Check for type fields
-      console.log('\n=== TYPE FIELDS ===')
-      console.log('product_type:', firstCoating.product_type)
-      console.log('productType:', firstCoating.productType)
-      console.log('type:', firstCoating.type)
-      console.log('Type:', firstCoating.Type)
-      
-      // Check for model fields
-      console.log('\n=== MODEL FIELDS ===')
-      console.log('product_model:', firstCoating.product_model)
-      console.log('productModel:', firstCoating.productModel)
-      console.log('model:', firstCoating.model)
-      console.log('Model:', firstCoating.Model)
-      
-      // Check all_attributes
-      if (firstCoating.all_attributes) {
-        console.log('\n=== ALL_ATTRIBUTES ===')
-        const attr = typeof firstCoating.all_attributes === 'string' 
-          ? JSON.parse(firstCoating.all_attributes) 
-          : firstCoating.all_attributes
-        console.log(JSON.stringify(attr, null, 2))
-      }
-    }
+    const sampleCoating = coatings1?.[0] || coatings2?.[0] || null
+    const allFieldNames = sampleCoating ? Object.keys(sampleCoating) : []
 
     return NextResponse.json({
       success: true,
-      totalCoatings: coatings?.length || 0,
-      sampleCoating: coatings?.[0] || null,
-      allFieldNames: coatings?.[0] ? Object.keys(coatings[0]) : []
+      totalCoatings: coatings1?.length || coatings2?.length || 0,
+      totalInDB: count,
+      sampleCoating,
+      allFieldNames,
+      errors: {
+        query1: error1?.message,
+        query2: error2?.message
+      }
     })
 
   } catch (error: any) {
-    console.error('❌ Debug error:', error)
+    console.error('❌ Debug endpoint error:', error)
     return NextResponse.json(
-      { success: false, error: error.message },
+      { 
+        success: false,
+        error: error.message,
+        stack: error.stack
+      },
       { status: 500 }
     )
   }

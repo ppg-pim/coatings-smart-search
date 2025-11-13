@@ -17,9 +17,15 @@ export default function Home() {
   const [showFilters, setShowFilters] = useState(false)
   
   // Available filter options
-  const [familyOptions, setFamilyOptions] = useState<string[]>([])
-  const [productTypeOptions, setProductTypeOptions] = useState<string[]>([])
-  const [productModelOptions, setProductModelOptions] = useState<string[]>([])
+  const [filterOptions, setFilterOptions] = useState<{
+    families: string[]
+    productTypes: string[]
+    productModels: string[]
+  }>({
+    families: [],
+    productTypes: [],
+    productModels: []
+  })
   const [loadingFilters, setLoadingFilters] = useState(true)
 
   // Load filter options on mount
@@ -27,52 +33,48 @@ export default function Home() {
     loadFilterOptions()
   }, [])
 
-  // Reload filter options when any filter changes
-  useEffect(() => {
-    if (!loadingFilters) {
-      loadFilterOptions()
-    }
-  }, [selectedFamily, selectedProductType, selectedProductModel])
+const loadFilterOptions = async () => {
+  setLoadingFilters(true)
+  try {
+    // Build query params for current filters
+    const params = new URLSearchParams()
+    if (selectedFamily) params.append('family', selectedFamily)
+    if (selectedProductType) params.append('productType', selectedProductType)
+    if (selectedProductModel) params.append('productModel', selectedProductModel)
 
-  const loadFilterOptions = async () => {
-    setLoadingFilters(true)
-    try {
-      // Build current filters object
-      const currentFilters: any = {}
-      if (selectedFamily) currentFilters.family = selectedFamily
-      if (selectedProductType) currentFilters.productType = selectedProductType
-      if (selectedProductModel) currentFilters.productModel = selectedProductModel
-
-      // Call the filter-options API with POST to send current filters
-      const response = await fetch('/api/filter-options', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ currentFilters }),
-      })
+    // Call the filter-options API with GET
+    const url = `/api/filter-options${params.toString() ? `?${params.toString()}` : ''}`
+    console.log('🔍 Fetching from URL:', url) // Debug log
+    const response = await fetch(url)
+    
+    if (response.ok) {
+      const data = await response.json()
+      console.log('📦 Full API response:', data) // Debug log
+      console.log('📊 Families array:', data.families) // Debug log
+      console.log('📊 Types array:', data.productTypes) // Debug log
+      console.log('📊 Models array:', data.productModels) // Debug log
       
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          setFamilyOptions(data.families || [])
-          setProductTypeOptions(data.productTypes || [])
-          setProductModelOptions(data.productModels || [])
-          console.log('✅ Loaded filter options:', {
-            families: data.families?.length,
-            types: data.productTypes?.length,
-            models: data.productModels?.length
-          })
-        }
-      } else {
-        console.error('Failed to load filter options:', response.status)
+      if (data.success) {
+        setFilterOptions({
+          families: data.families || [],
+          productTypes: data.productTypes || [],
+          productModels: data.productModels || []
+        })
+        console.log('✅ Loaded filter options:', {
+          families: data.families?.length || 0,
+          types: data.productTypes?.length || 0,
+          models: data.productModels?.length || 0
+        })
       }
-    } catch (err) {
-      console.error('Failed to load filter options:', err)
-    } finally {
-      setLoadingFilters(false)
+    } else {
+      console.error('Failed to load filter options:', response.status)
     }
+  } catch (err) {
+    console.error('Failed to load filter options:', err)
+  } finally {
+    setLoadingFilters(false)
   }
+}
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -411,7 +413,7 @@ export default function Home() {
                 {/* Family Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Family ({familyOptions.length} options)
+                    Family ({filterOptions.families.length} options)
                   </label>
                   <select
                     value={selectedFamily}
@@ -420,7 +422,7 @@ export default function Home() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Families</option>
-                    {familyOptions.map((option) => (
+                    {filterOptions.families.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
@@ -431,7 +433,7 @@ export default function Home() {
                 {/* Product Type Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Product Type ({productTypeOptions.length} options)
+                    Product Type ({filterOptions.productTypes.length} options)
                   </label>
                   <select
                     value={selectedProductType}
@@ -440,7 +442,7 @@ export default function Home() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Types</option>
-                    {productTypeOptions.map((option) => (
+                    {filterOptions.productTypes.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
@@ -451,7 +453,7 @@ export default function Home() {
                 {/* Product Model Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Product Model ({productModelOptions.length} options)
+                    Product Model ({filterOptions.productModels.length} options)
                   </label>
                   <select
                     value={selectedProductModel}
@@ -460,7 +462,7 @@ export default function Home() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Models</option>
-                    {productModelOptions.map((option) => (
+                    {filterOptions.productModels.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
