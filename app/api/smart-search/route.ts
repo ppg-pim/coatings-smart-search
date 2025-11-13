@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import OpenAI from 'openai';
 
-export async function POST(req: Request) {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY, // This runs at request time
-  });
-
 type ProductRecord = Record<string, any>
 
 // Enhanced HTML stripping with comprehensive entity handling
@@ -216,7 +211,7 @@ function applyUserFilters(dbQuery: any, filters: any, columns: string[], allProd
     }
   }
 
-  // For product model filter (changed from specification)
+  // For product model filter
   if (filters.productModel) {
     const modelColumns = ['product_model', 'productModel', 'model', 'Model'].filter(col => columns.includes(col))
     
@@ -258,7 +253,7 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
       }
     }
 
-    // Check product model (changed from specification)
+    // Check product model
     if (filters.productModel) {
       const modelValue = product.product_model || product.productModel || product.model || product.Model
       const attrModel = product.all_attributes?.product_model || product.all_attributes?.model
@@ -273,6 +268,10 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
 }
 
 export async function POST(request: NextRequest) {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
   try {
     const body = await request.json()
     const { query, filters, getFilterOptions } = body
@@ -308,7 +307,7 @@ export async function POST(request: NextRequest) {
             productTypes.add(String(typeValue).trim())
           }
 
-          // Extract product model (changed from specification)
+          // Extract product model
           const modelValue = coating.product_model || coating.productModel || coating.model || coating.Model
           if (modelValue && String(modelValue).trim()) {
             productModels.add(String(modelValue).trim())
