@@ -1,4 +1,4 @@
-// File: C:\Users\H526217\Downloads\PPG-Coatings\Coatings-Smart-Product-Search\app\layout.tsx
+// File: C:\Users\rpram\Downloads\coating-product-search\Coatings\app\layout.tsx
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

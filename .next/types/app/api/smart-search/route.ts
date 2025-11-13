@@ -1,4 +1,4 @@
-// File: C:\Users\H526217\Downloads\PPG-Coatings\Coatings-Smart-Product-Search\app\api\smart-search\route.ts
+// File: C:\Users\rpram\Downloads\coating-product-search\Coatings\app\api\smart-search\route.ts
 import * as entry from '../../../../../app/api/smart-search/route.js'
 import type { NextRequest } from 'next/server.js'
 
