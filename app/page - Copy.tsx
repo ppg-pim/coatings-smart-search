@@ -10,18 +10,20 @@ export default function CoatingsPage() {
   const [specificAnswer, setSpecificAnswer] = useState<any>(null)
   const [comparisonData, setComparisonData] = useState<any>(null)
   const [analyticalData, setAnalyticalData] = useState<any>(null)
-  const [hasSearched, setHasSearched] = useState(false)
   
+  // Filter states
   const [selectedFamily, setSelectedFamily] = useState('')
   const [selectedProductType, setSelectedProductType] = useState('')
   const [selectedProductModel, setSelectedProductModel] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   
+  // Available filter options
   const [familyOptions, setFamilyOptions] = useState<string[]>([])
   const [productTypeOptions, setProductTypeOptions] = useState<string[]>([])
   const [productModelOptions, setProductModelOptions] = useState<string[]>([])
   const [loadingFilters, setLoadingFilters] = useState(true)
 
+  // Load filter options on mount - inline version
   useEffect(() => {
     loadFilterOptionsInline()
   }, [])
@@ -29,6 +31,7 @@ export default function CoatingsPage() {
   const loadFilterOptionsInline = async () => {
     setLoadingFilters(true)
     try {
+      // Call the coatings-smart-search API with a special flag to get filter options
       const response = await fetch('/api/coatings-smart-search', {
         method: 'POST',
         headers: {
@@ -66,7 +69,6 @@ export default function CoatingsPage() {
     setSpecificAnswer(null)
     setComparisonData(null)
     setAnalyticalData(null)
-    setHasSearched(true)
 
     try {
       const response = await fetch('/api/coatings-smart-search', {
@@ -90,20 +92,24 @@ export default function CoatingsPage() {
         throw new Error(data.error || 'Search failed')
       }
 
+      // Handle analytical responses
       if (data.questionType === 'analytical') {
         setAnalyticalData(data)
         setResults(data.results || [])
       }
+      // Handle comparison responses
       else if (data.questionType === 'comparison') {
         setComparisonData(data)
         setResults(data.products || [])
       }
+      // Handle specific question responses
       else if (data.questionType === 'specific') {
         setSpecificAnswer(data)
         if (data.fullProduct) {
           setResults([data.fullProduct])
         }
       } 
+      // Handle list responses
       else {
         setResults(data.results || [])
       }
@@ -122,6 +128,7 @@ export default function CoatingsPage() {
 
   const hasActiveFilters = selectedFamily || selectedProductType || selectedProductModel
 
+  // Check if value is empty
   const isEmpty = (value: any): boolean => {
     if (value === null || value === undefined) return true
     if (typeof value === 'string' && value.trim() === '') return true
@@ -129,6 +136,7 @@ export default function CoatingsPage() {
     return false
   }
 
+  // Group attributes by category for better display
   const groupAttributes = (product: any) => {
     const headerFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
     const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable']
@@ -140,6 +148,7 @@ export default function CoatingsPage() {
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
+      // Skip if already seen, excluded, or empty
       if (seen.has(lowerKey) || excludeFields.includes(lowerKey) || isEmpty(value)) return
       seen.add(lowerKey)
       
@@ -153,6 +162,7 @@ export default function CoatingsPage() {
     return { header, other }
   }
 
+  // Format field name for display
   const formatFieldName = (key: string): string => {
     const fieldMappings: { [key: string]: string } = {
       'sku': 'SKU',
@@ -175,6 +185,7 @@ export default function CoatingsPage() {
       .replace(/\b\w/g, (char) => char.toUpperCase())
   }
 
+  // Format date values
   const formatValue = (key: string, value: any): string => {
     const lowerKey = key.toLowerCase()
     if ((lowerKey.includes('created') || lowerKey.includes('updated')) && 
@@ -188,6 +199,7 @@ export default function CoatingsPage() {
     return String(value)
   }
 
+  // Get all unique keys from products for comparison
   const getAllKeys = (products: any[]) => {
     const allKeys = new Set<string>()
     const seenLowerKeys = new Set<string>()
@@ -205,11 +217,13 @@ export default function CoatingsPage() {
     return Array.from(allKeys)
   }
 
+  // Check if values are different across products
   const isDifferent = (key: string, products: any[]) => {
     const values = products.map(p => p[key])
     return new Set(values).size > 1
   }
 
+  // Render analytical summary
   const renderAnalyticalSummary = () => {
     if (!analyticalData) return null
 
@@ -276,6 +290,7 @@ export default function CoatingsPage() {
     )
   }
 
+  // Render comparison table
   const renderComparison = () => {
     if (!comparisonData || !comparisonData.products || comparisonData.products.length < 2) {
       return null
@@ -431,16 +446,43 @@ export default function CoatingsPage() {
                 </span>
               )}
             </button>
-            <button
-              type="submit"
-              disabled={loading || !query.trim()}
-              className="px-8 py-3 text-white rounded-lg hover:opacity-90 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-              style={{ backgroundColor: '#0078a9' }}
-            >
-              {loading ? 'Searching...' : 'Search'}
-            </button>
+          {/* Search Button with Spinner */}
+          <button
+            type="submit"
+            disabled={loading || !query.trim()}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2 min-w-[120px]"
+          >
+            {loading ? (
+              <>
+                <svg 
+                  className="animate-spin h-5 w-5 text-white" 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  fill="none" 
+                  viewBox="0 0 24 24"
+                >
+                  <circle 
+                    className="opacity-25" 
+                    cx="12" 
+                    cy="12" 
+                    r="10" 
+                    stroke="currentColor" 
+                    strokeWidth="4"
+                  />
+                  <path 
+                    className="opacity-75" 
+                    fill="currentColor" 
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                <span>Searching...</span>
+              </>
+            ) : (
+              'Search'
+            )}
+          </button>
           </div>
 
+          {/* Filter Panel */}
           {showFilters && (
             <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
               <div className="flex items-center justify-between mb-4">
@@ -459,6 +501,7 @@ export default function CoatingsPage() {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Family Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Family ({familyOptions.length} options)
@@ -478,6 +521,7 @@ export default function CoatingsPage() {
                   </select>
                 </div>
 
+                {/* Product Type Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Type ({productTypeOptions.length} options)
@@ -497,6 +541,7 @@ export default function CoatingsPage() {
                   </select>
                 </div>
 
+                {/* Product Model Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Model ({productModelOptions.length} options)
@@ -516,186 +561,89 @@ export default function CoatingsPage() {
                   </select>
                 </div>
               </div>
-
-              {hasActiveFilters && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="text-sm text-gray-600">Active filters:</span>
-                  {selectedFamily && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                      Family: {selectedFamily}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedFamily('')}
-                        className="ml-2 text-blue-600 hover:text-blue-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  )}
-                  {selectedProductType && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                      Type: {selectedProductType}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedProductType('')}
-                        className="ml-2 text-green-600 hover:text-green-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  )}
-                  {selectedProductModel && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-                      Model: {selectedProductModel}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedProductModel('')}
-                        className="ml-2 text-purple-600 hover:text-purple-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           )}
         </form>
       </div>
 
+      {/* Error Message */}
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
-
-      {analyticalData && renderAnalyticalSummary()}
-
-      {comparisonData && renderComparison()}
-
-      {specificAnswer && (
-        <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
-          <div className="flex items-start">
+        <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-lg">
+          <div className="flex">
             <div className="flex-shrink-0">
-              <svg className="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
               </svg>
             </div>
-            <div className="ml-3 flex-1">
-              <h3 className="text-lg font-semibold text-blue-900 mb-2">Answer</h3>
-              <p className="text-green-800 text-lg">{specificAnswer.answer}</p>
-              
-              {specificAnswer.extractedData && Object.keys(specificAnswer.extractedData).length > 0 && (
-                <div className="mt-4 bg-white rounded-lg p-4 border border-blue-200">
-                  <h4 className="font-semibold text-sm text-blue-900 mb-2">Extracted Information:</h4>
-                  <div className="space-y-1">
-                    {Object.entries(specificAnswer.extractedData).map(([key, value]) => (
-                      <div key={key} className="text-sm">
-                        <span className="font-medium text-gray-700">{formatFieldName(key)}:</span>{' '}
-                        <span className="text-gray-900">{String(value)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div className="ml-3">
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           </div>
         </div>
       )}
 
-      {results.length > 0 && !comparisonData && (
-        <div id="product-references">
-          <div className="mb-6 flex items-center justify-between">
-            <h2 className="text-2xl font-semibold" style={{ color: '#0078a9' }}>
-              {analyticalData ? 'Coating Product References' : specificAnswer ? 'Full Product Details' : `Found ${results.length} ${results.length === 1 ? 'result' : 'results'}`}
-            </h2>
-            {analyticalData && (
-              <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
-                {results.length} coating product{results.length !== 1 ? 's' : ''} analyzed
-              </span>
-            )}
-          </div>
+      {/* Analytical Summary */}
+      {renderAnalyticalSummary()}
 
+      {/* Specific Answer */}
+      {specificAnswer && (
+        <div className="mb-8 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
+          <div className="p-6">
+            <div className="flex items-start mb-4">
+              <div className="flex-shrink-0">
+                <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-purple-900 mb-2">Specific Answer</h2>
+                <p className="text-purple-700 text-sm mb-4">
+                  Product: <span className="font-semibold">{specificAnswer.extractedData?.sku}</span>
+                </p>
+                <div className="prose prose-purple max-w-none">
+                  <div className="text-gray-800 leading-relaxed whitespace-pre-wrap">
+                    {specificAnswer.answer}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison Table */}
+      {renderComparison()}
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div id="product-references" className="bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-2xl font-bold mb-6" style={{ color: '#0078a9' }}>
+            {analyticalData ? 'Product References' : 'Search Results'} ({results.length})
+          </h2>
           <div className="space-y-6">
             {results.map((product, index) => {
               const { header, other } = groupAttributes(product)
-              
               return (
-                <div
-                  key={index}
-                  className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
-                >
-                  {Object.keys(header).length > 0 && (
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-6">
-                      {Object.entries(header).map(([key, value]) => {
-                        const lowerKey = key.toLowerCase()
-                        
-                        if (lowerKey === 'sku') {
-                          return (
-                            <div key={key} className="mb-3">
-                              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">SKU</span>
-                              <h3 className="text-2xl font-bold mt-1" style={{ color: '#0078a9' }}>
-                                {String(value)}
-                              </h3>
-                            </div>
-                          )
-                        }
-                        
-                        if (lowerKey === 'name' || lowerKey === 'product_name' || lowerKey === 'productname') {
-                          return (
-                            <div key={key} className="mb-3">
-                              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Product Name</span>
-                              <h4 className="text-xl font-semibold text-gray-900 mt-1">
-                                {String(value)}
-                              </h4>
-                            </div>
-                          )
-                        }
-                        
-                        if (lowerKey === 'description' || lowerKey === 'product_description') {
-                          return (
-                            <div key={key} className="mt-3">
-                              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Description</span>
-                              <p className="text-gray-700 mt-1 leading-relaxed">
-                                {String(value)}
-                              </p>
-                            </div>
-                          )
-                        }
-                        
-                        return null
-                      })}
-                    </div>
-                  )}
-
-                  {Object.keys(other).length > 0 && (
-                    <div className="p-6">
-                      <h4 className="text-lg font-semibold mb-4" style={{ color: '#0078a9' }}>
-                        Technical Specifications
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {Object.entries(other).map(([key, value]) => (
-                          <div 
-                            key={key} 
-                            className="border-l-2 border-gray-200 pl-4 py-2 hover:border-blue-400 transition-colors"
-                          >
-                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                              {formatFieldName(key)}
-                            </div>
-                            <div className="text-sm text-gray-900 font-medium">
-                              {formatValue(key, value)}
-                            </div>
-                          </div>
-                        ))}
+                <div key={index} className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
+                  {/* Header Section */}
+                  <div className="mb-4 pb-4 border-b border-gray-200">
+                    {Object.entries(header).map(([key, value]) => (
+                      <div key={key} className="mb-2">
+                        <span className="font-semibold text-gray-700">{formatFieldName(key)}: </span>
+                        <span className="text-gray-900">{formatValue(key, value)}</span>
                       </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
 
-                  {Object.keys(header).length === 0 && Object.keys(other).length === 0 && (
-                    <div className="p-6 text-center text-gray-500">
-                      No displayable data available for this product
-                    </div>
-                  )}
+                  {/* Other Attributes */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+                    {Object.entries(other).map(([key, value]) => (
+                      <div key={key} className="text-sm">
+                        <span className="font-medium text-gray-600">{formatFieldName(key)}: </span>
+                        <span className="text-gray-800">{formatValue(key, value)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )
             })}
@@ -703,27 +651,14 @@ export default function CoatingsPage() {
         </div>
       )}
 
-      {loading && (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9]"></div>
-          <p className="mt-4 text-gray-600">Searching coating products...</p>
-          {query && (
-            <p className="mt-2 text-sm text-gray-500">
-              You are searching: <span className="font-semibold" style={{ color: '#0078a9' }}>{query}</span>
-            </p>
-          )}
-        </div>
-      )}
-
-      {!loading && hasSearched && !error && results.length === 0 && !specificAnswer && !comparisonData && !analyticalData && (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      {/* No Results */}
+      {!loading && !error && results.length === 0 && !specificAnswer && !comparisonData && !analyticalData && query && (
+        <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+          <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <h3 className="mt-4 text-lg font-medium text-gray-900">No coating products found</h3>
-          <p className="mt-2 text-sm text-gray-500">
-            Try adjusting your search query or filters
-          </p>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">No coating products found</h3>
+          <p className="text-gray-600">Try adjusting your search query or filters</p>
         </div>
       )}
     </main>
