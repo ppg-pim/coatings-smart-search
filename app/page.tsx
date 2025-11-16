@@ -401,7 +401,7 @@ export default function CoatingsPage() {
                       .replace(/(?<!<\/h[123]>)$/g, '</p>')
                       .replace(/\n- /g, '<li class="ml-4">')
                       .replace(/<\/p>\s*<li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1 mb-3"><li')
-                      .replace(/<li class="ml-4">(.*?)(?=\n(?!- )|<\/p>|$)/gs, '<li class="ml-4">$1</li>')
+                      .replace(/<li class="ml-4">(.*?)(?=<\/p>|<p|$)/g, '<li class="ml-4">$1</li>')
                       .replace(/(<li.*?<\/li>)\s*<p/g, '$1</ul><p')
                   }}
                 />
