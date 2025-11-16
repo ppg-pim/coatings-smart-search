@@ -146,23 +146,35 @@ export default function CoatingsPage() {
   }
 
   const groupAttributes = (product: any) => {
-    const headerFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
+    // Define the EXACT order we want for header fields
+    const headerFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
     const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable', '_sourceTable']
     
     const header: any = {}
     const other: any = {}
     const seen = new Set<string>()
 
+    // First pass: collect all fields
+    const headerCandidates: { [key: string]: any } = {}
+    
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
       if (seen.has(lowerKey) || excludeFields.includes(lowerKey) || isEmpty(value)) return
       seen.add(lowerKey)
       
-      if (headerFields.includes(lowerKey)) {
-        header[key] = value
+      if (headerFieldsOrder.includes(lowerKey)) {
+        headerCandidates[lowerKey] = { originalKey: key, value }
       } else {
         other[key] = value
+      }
+    })
+
+    // Second pass: add header fields in the desired order
+    headerFieldsOrder.forEach(fieldName => {
+      if (headerCandidates[fieldName]) {
+        const { originalKey, value } = headerCandidates[fieldName]
+        header[originalKey] = value
       }
     })
 
@@ -175,6 +187,7 @@ export default function CoatingsPage() {
       'product_name': 'Product Name',
       'productname': 'Product Name',
       'product_description': 'Description',
+      'description': 'Description',
       'product_model': 'Product Model',
       'productmodel': 'Product Model',
       'product_type': 'Product Type',
@@ -354,10 +367,19 @@ export default function CoatingsPage() {
     const products = comparisonData.products
     const allKeys = getAllKeys(products)
     
-    const priorityFields = ['sku', 'product_name', 'productname', 'name', 'description', 'product_description']
+    // FIXED: Ensure proper order for comparison table
+    const priorityFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
     
-    const priority = allKeys.filter(k => priorityFields.includes(k.toLowerCase()))
-    const technical = allKeys.filter(k => !priorityFields.includes(k.toLowerCase()))
+    // Sort priority fields by the defined order
+    const priority = allKeys
+      .filter(k => priorityFieldsOrder.includes(k.toLowerCase()))
+      .sort((a, b) => {
+        const indexA = priorityFieldsOrder.indexOf(a.toLowerCase())
+        const indexB = priorityFieldsOrder.indexOf(b.toLowerCase())
+        return indexA - indexB
+      })
+    
+    const technical = allKeys.filter(k => !priorityFieldsOrder.includes(k.toLowerCase()))
 
     return (
       <div className="mb-8">

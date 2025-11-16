@@ -19,18 +19,44 @@ interface SearchParams {
   useBatchFetch: boolean
 }
 
-// Clean product data by removing null/undefined and normalizing
+// Clean product data by removing null/undefined and normalizing - ENHANCED WITH HTML STRIPPING
 function cleanProductData(product: ProductRecord): ProductRecord {
   const cleaned: ProductRecord = {}
   
   Object.entries(product).forEach(([key, value]) => {
     // Only include non-null, non-undefined values
     if (value !== null && value !== undefined) {
-      // Convert empty strings to undefined
-      if (typeof value === 'string' && value.trim() === '') {
-        return
+      // Handle string values
+      if (typeof value === 'string') {
+        // Strip HTML and decode entities
+        let cleanedValue = value
+          .replace(/<br\s*\/?>/gi, '\n')  // Convert <br> to newlines
+          .replace(/<\/p>/gi, '\n\n')     // Convert </p> to double newlines
+          .replace(/<li>/gi, '• ')        // Convert <li> to bullet points
+          .replace(/<\/li>/gi, '\n')      // Convert </li> to newlines
+          .replace(/<[^>]+>/g, '')        // Remove all other HTML tags
+          .replace(/&reg;/gi, '®')        // Convert &reg; to ®
+          .replace(/&trade;/gi, '™')      // Convert &trade; to ™
+          .replace(/&copy;/gi, '©')       // Convert &copy; to ©
+          .replace(/&nbsp;/gi, ' ')       // Convert &nbsp; to space
+          .replace(/&amp;/gi, '&')        // Convert &amp; to &
+          .replace(/&lt;/gi, '<')         // Convert &lt; to <
+          .replace(/&gt;/gi, '>')         // Convert &gt; to >
+          .replace(/&quot;/gi, '"')       // Convert &quot; to "
+          .replace(/&#39;/gi, "'")        // Convert &#39; to '
+          .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))  // Decode numeric entities
+          .replace(/&#x([0-9a-f]+);/gi, (match, hex) => String.fromCharCode(parseInt(hex, 16)))  // Decode hex entities
+          .replace(/\n{3,}/g, '\n\n')     // Replace 3+ newlines with 2
+          .trim()
+        
+        // Only include non-empty strings
+        if (cleanedValue !== '') {
+          cleaned[key] = cleanedValue
+        }
+      } else {
+        // Non-string values pass through
+        cleaned[key] = value
       }
-      cleaned[key] = value
     }
   })
   
@@ -302,27 +328,38 @@ You can filter by any of these categories using the filter options in the search
   return null
 }
 
-// Parse user query to determine search strategy
+// Parse user query to determine search strategy - WITH SMART SPLITTING
 function parseSearchQuery(query: string): SearchParams {
-  const lowerQuery = query.toLowerCase()
+  // Smart pre-processing: Try to split concatenated comparison patterns
+  // e.g., "02Y040Ato" -> "02Y040A to"
+  let processedQuery = query
+  const concatenatedPattern = /([a-z0-9]+)(to|vs|versus)([a-z0-9]+)/gi
+  processedQuery = processedQuery.replace(concatenatedPattern, '$1 $2 $3')
   
-  // Detect comparison queries
+  console.log(`📝 Processed query: "${processedQuery}"`)
+  
+  // Detect comparison queries - IMPROVED with better word boundary handling
   const comparisonPatterns = [
-    /compare\s+(\w+)\s+(vs\.?|versus|and|with)\s+(\w+)/i,
-    /(\w+)\s+(vs\.?|versus)\s+(\w+)/i,
-    /difference between\s+(\w+)\s+and\s+(\w+)/i,
-    /(\w+)\s+or\s+(\w+)/i
+    /compare\s+([a-z0-9]+)\s*(?:vs\.?|versus|and|with|to)\s*([a-z0-9]+)/i,
+    /([a-z0-9]+)\s*(?:vs\.?|versus|to)\s*([a-z0-9]+)/i,
+    /difference\s+between\s+([a-z0-9]+)\s+and\s+([a-z0-9]+)/i,
+    /([a-z0-9]+)\s+or\s+([a-z0-9]+)/i
   ]
   
   for (const pattern of comparisonPatterns) {
-    const match = query.match(pattern)
+    const match = processedQuery.match(pattern)
     if (match) {
-      const keywords = match.slice(1).filter(k => !['vs', 'vs.', 'versus', 'and', 'or', 'with'].includes(k.toLowerCase()))
-      return {
-        questionType: 'comparison',
-        searchKeywords: keywords,
-        requireAllKeywords: false,
-        useBatchFetch: true
+      // Extract just the product identifiers
+      const keywords = [match[1], match[2]].filter(k => k && k.length > 0)
+      
+      if (keywords.length >= 2) {
+        console.log(`🔍 Detected comparison: ${keywords.join(' vs ')}`)
+        return {
+          questionType: 'comparison',
+          searchKeywords: keywords,
+          requireAllKeywords: false,
+          useBatchFetch: true
+        }
       }
     }
   }
@@ -341,7 +378,7 @@ function parseSearchQuery(query: string): SearchParams {
     /which.*should/i
   ]
   
-  const isAnalytical = analyticalPatterns.some(pattern => pattern.test(query))
+  const isAnalytical = analyticalPatterns.some(pattern => pattern.test(processedQuery))
   
   // Extract keywords (remove common words)
   const stopWords = new Set([
@@ -350,7 +387,7 @@ function parseSearchQuery(query: string): SearchParams {
     'should', 'would', 'could', 'best', 'good', 'better', 'vs', 'versus', 'compare', 'difference'
   ])
   
-  const words = query
+  const words = processedQuery
     .toLowerCase()
     .replace(/[^\w\s-]/g, ' ')
     .split(/\s+/)
@@ -367,7 +404,7 @@ function parseSearchQuery(query: string): SearchParams {
   }
 }
 
-// SIMPLIFIED fast search - focuses on most important columns only
+// IMPROVED fast search - handles multiple keywords properly for comparisons
 async function fastMultiKeywordSearch(
   keywords: string[],
   filters: { family?: string; productType?: string; productModel?: string },
@@ -376,43 +413,59 @@ async function fastMultiKeywordSearch(
   console.log(`⚡ Using FAST database search for: ${keywords.join(', ')}`)
   
   const startTime = Date.now()
+  const allResults: ProductRecord[] = []
+  const seenIds = new Set<string>()
   
   try {
-    // Build a simple query focusing on SKU first (most common search)
-    const keyword = keywords[0]?.toLowerCase() || ''
-    
-    let query = supabaseClient
-      .from('coatings')
-      .select('*')
-    
-    // Apply filters
-    if (filters.family) query = query.eq('family', filters.family)
-    if (filters.productType) query = query.eq('Product_Type', filters.productType)
-    if (filters.productModel) query = query.eq('Product_Model', filters.productModel)
-    
-    // Simple OR search on key columns only
-    query = query.or(
-      `sku.ilike.%${keyword}%,` +
-      `Product_Name.ilike.%${keyword}%,` +
-      `Product_Model.ilike.%${keyword}%`
-    ).limit(100)
-    
-    const { data, error } = await query
+    // Search for each keyword separately to ensure we get results for all
+    for (const keyword of keywords) {
+      let query = supabaseClient
+        .from('coatings')
+        .select('*')
+      
+      // Apply filters
+      if (filters.family) query = query.eq('family', filters.family)
+      if (filters.productType) query = query.eq('Product_Type', filters.productType)
+      if (filters.productModel) query = query.eq('Product_Model', filters.productModel)
+      
+      // Simple OR search on key columns
+      query = query.or(
+        `sku.ilike.%${keyword}%,` +
+        `family.ilike.%${keyword}%,` +
+        `Product_Name.ilike.%${keyword}%,` +
+        `Product_Model.ilike.%${keyword}%`
+      ).limit(50)
+      
+      const { data, error } = await query
+      
+      if (error) {
+        console.error(`❌ Error searching for "${keyword}":`, error)
+        continue
+      }
+      
+      if (data && data.length > 0) {
+        console.log(`  ✓ Found ${data.length} results for "${keyword}"`)
+        data.forEach((item: any) => {
+          const id = item.id || item.sku || JSON.stringify(item)
+          if (!seenIds.has(id)) {
+            seenIds.add(id)
+            allResults.push(item)
+          }
+        })
+      } else {
+        console.log(`  ⚠️ No results for "${keyword}"`)
+      }
+    }
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(2)
     
-    if (error) {
-      console.error('❌ Error in coatings search:', error)
-      return []
-    }
-    
-    if (data && data.length > 0) {
-      console.log(`✅ Fast search found ${data.length} products in ${duration}s`)
-      return data
+    if (allResults.length > 0) {
+      console.log(`✅ Fast search found ${allResults.length} total products in ${duration}s`)
     } else {
       console.log(`❌ Fast search found no results in ${duration}s`)
-      return []
     }
+    
+    return allResults
   } catch (err) {
     console.error('❌ Error in coatings search:', err)
     return []
@@ -736,12 +789,15 @@ export async function POST(req: NextRequest) {
         }
       }
       
+      // Clean products BEFORE sending to AI to ensure HTML is stripped
+      const cleanedComparisonProducts = comparisonProducts.map(p => cleanProductData(p))
+      
       // Generate AI comparison summary
       let comparisonSummary = ''
-      if (comparisonProducts.length >= 2) {
-        console.log(`> 🤖 Generating AI comparison summary for ${comparisonProducts.length} products`)
+      if (cleanedComparisonProducts.length >= 2) {
+        console.log(`> 🤖 Generating AI comparison summary for ${cleanedComparisonProducts.length} products`)
         try {
-          const productsForAI = comparisonProducts.map(p => truncateProductForAI(p, 1000))
+          const productsForAI = cleanedComparisonProducts.map(p => truncateProductForAI(p, 1000))
           const combinedData = productsForAI.join('\n\n---\n\n')
           
           const comparisonCompletion = await openai.chat.completions.create({
@@ -778,13 +834,13 @@ GUIDELINES:
           
         } catch (error: any) {
           console.error('> ❌ Failed to generate comparison summary:', error.message)
-          comparisonSummary = `Comparing ${comparisonProducts.length} products: ${comparisonProducts.map(p => p.sku || p.Product_Name || 'Unknown').join(', ')}`
+          comparisonSummary = `Comparing ${cleanedComparisonProducts.length} products: ${cleanedComparisonProducts.map(p => p.sku || p.Product_Name || 'Unknown').join(', ')}`
         }
       }
       
       // Remove duplicates by SKU
       const uniqueProducts = Array.from(
-        new Map(comparisonProducts.map(p => [p.sku?.toLowerCase(), p])).values()
+        new Map(cleanedComparisonProducts.map(p => [p.sku?.toLowerCase(), p])).values()
       )
       
       console.log(`> ✅ Comparison ready: ${uniqueProducts.length} unique products`)
@@ -867,9 +923,54 @@ GUIDELINES:
       })
     }
     
-    // Handle lookup queries (default)
-    console.log(`> 📋 Lookup mode - returning product list`)
+    // Handle lookup queries (default) - NOW WITH AI ANALYSIS
+    console.log(`> 📋 Lookup mode - returning product list with AI summary`)
     const cleanedResults = rankedResults.slice(0, 50).map(p => cleanProductData(p))
+    
+    // Generate AI summary for lookup queries too
+    let lookupSummary = ''
+    if (cleanedResults.length > 0) {
+      console.log(`> 🤖 Generating AI summary for lookup results`)
+      try {
+        const topProductsForAI = cleanedResults.slice(0, 5).map(p => truncateProductForAI(p, 1500))
+        const combinedData = topProductsForAI.join('\n\n---\n\n')
+        
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert aerospace coatings consultant. Analyze the following product data and provide helpful insights.
+
+PRODUCT DATA:
+${combinedData}
+
+GUIDELINES:
+- Provide a brief overview of the products found
+- Highlight key features and specifications
+- If multiple products are shown, note their similarities and differences
+- Use bullet points for clarity
+- Be concise but informative
+- Format with markdown for readability`
+            },
+            {
+              role: 'user',
+              content: `Summarize these products: ${query}`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 800
+        })
+        
+        lookupSummary = completion.choices[0].message.content || ''
+        lookupSummary = stripHtml(lookupSummary)
+        console.log(`> ✅ AI summary generated for lookup`)
+        
+      } catch (error: any) {
+        console.error('> ❌ Failed to generate lookup summary:', error.message)
+        lookupSummary = `Found ${cleanedResults.length} product(s) matching your search.`
+      }
+    }
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
@@ -879,6 +980,7 @@ GUIDELINES:
       success: true,
       questionType: "lookup",
       products: cleanedResults,
+      summary: lookupSummary,
       count: cleanedResults.length,
       totalFound: rankedResults.length,
       message: `Found ${rankedResults.length} product(s), showing top ${cleanedResults.length}`
