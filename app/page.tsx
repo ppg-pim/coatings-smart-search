@@ -30,7 +30,7 @@ export default function CoatingsPage() {
     loadFilterOptionsInline()
   }, [])
 
-  // FIXED: Enhanced markdown rendering function with table support
+  // Enhanced markdown rendering function with table support
   const renderMarkdown = (markdown: string, colorClass: string = 'green'): string => {
     let html = markdown
     
@@ -45,51 +45,53 @@ export default function CoatingsPage() {
     const color = colors[colorClass] || colors.green
     
     // 1. Handle markdown tables FIRST (before other replacements)
-    html = html.replace(/\n\|(.+)\|\n\|[-:\s|]+\|\n((?:\|.+\|\n?)+)/g, (match, header, rows) => {
-      const headerCells = header.split('|').map((h: string) => h.trim()).filter(Boolean)
-      const rowLines = rows.trim().split('\n')
+    // Fixed regex pattern to avoid CSS conflicts
+    const tablePattern = /\n\|(.+)\|\n\|[\-:\s|]+\|\n((?:\|.+\|\n?)+)/g
+    html = html.replace(tablePattern, (match, header, rows) => {
+      const headerCells = header.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
+        `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell.trim()}</th>`
+      ).join('')
       
-      const tableRows = rowLines.map((row: string) => {
-        const cells = row.split('|').map((c: string) => c.trim()).filter(Boolean)
-        return `<tr>${cells.map((cell: string) => `<td class="px-4 py-2 border border-gray-300">${cell}</td>`).join('')}</tr>`
+      const bodyRows = rows.trim().split('\n').map((row: string) => {
+        const cells = row.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
+          `<td class="px-4 py-3 text-sm text-gray-800 border-b border-gray-200">${cell.trim()}</td>`
+        ).join('')
+        return `<tr class="hover:bg-gray-50">${cells}</tr>`
       }).join('')
       
-      return `<div class="overflow-x-auto my-4"><table class="min-w-full border-collapse border border-gray-300"><thead><tr>${headerCells.map((h: string) => `<th class="px-4 py-2 bg-gray-100 border border-gray-300 font-semibold">${h}</th>`).join('')}</tr></thead><tbody>${tableRows}</tbody></table></div>`
+      return `<div class="overflow-x-auto my-6"><table class="min-w-full bg-white border border-gray-300 rounded-lg shadow-sm"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`
     })
     
-    // 2. Headers (must come before bold to avoid conflicts)
-    html = html.replace(/^### (.+)$/gm, `<h3 class="text-lg font-semibold ${color.heading} mt-4 mb-2">$1</h3>`)
-    html = html.replace(/^## (.+)$/gm, `<h2 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h2>`)
-    html = html.replace(/^# (.+)$/gm, `<h1 class="text-2xl font-bold ${color.heading} mt-8 mb-4">$1</h1>`)
+    // 2. Handle headings
+    html = html.replace(/### (.*?)(\n|$)/g, `<h3 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h3>`)
+    html = html.replace(/## (.*?)(\n|$)/g, `<h2 class="text-2xl font-bold ${color.text} mt-6 mb-4">$1</h2>`)
+    html = html.replace(/# (.*?)(\n|$)/g, `<h1 class="text-3xl font-bold ${color.text} mt-6 mb-4">$1</h1>`)
     
-    // 3. Bold text
-    html = html.replace(/\*\*(.+?)\*\*/g, `<strong class="font-semibold ${color.bold}">$1</strong>`)
+    // 3. Handle bold text
+    html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
     
-    // 4. Italic text
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // 4. Handle bullet lists (convert - to •)
+    html = html.replace(/\n- /g, '\n• ')
     
-    // 5. Bullet points
-    html = html.replace(/^[•\-\*] (.+)$/gm, `<li class="${color.text}">$1</li>`)
-    html = html.replace(/(<li[^>]*>.*<\/li>\n?)+/g, '<ul class="list-disc list-inside space-y-1 my-2">$&</ul>')
-    
-    // 6. Numbered lists
-    html = html.replace(/^\d+\.\s+(.+)$/gm, `<li class="${color.text}">$1</li>`)
-    html = html.replace(/(<li[^>]*>.*<\/li>\n?)+/g, (match) => {
-      if (!match.includes('list-disc')) {
-        return `<ol class="list-decimal list-inside space-y-1 my-2">${match}</ol>`
-      }
-      return match
+    // 5. Handle paragraphs
+    const lines = html.split('\n\n')
+    const processedLines = lines.map(line => {
+      // Skip if already HTML
+      if (line.trim().startsWith('<')) return line
+      // Skip empty lines
+      if (line.trim() === '') return ''
+      // Wrap in paragraph
+      return `<p class="mt-4">${line}</p>`
     })
+    html = processedLines.join('')
     
-    // 7. Paragraphs (double line breaks)
-    html = html.replace(/\n\n/g, '</p><p class="mb-2">')
-    html = `<p class="mb-2">${html}</p>`
+    // 6. Handle lists within paragraphs
+    html = html.replace(/<p class="mt-4">• /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
+    html = html.replace(/\n• /g, '</li><li>')
+    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/gs, '</li><li>$1</li></ul>')
     
-    // 8. Single line breaks
-    html = html.replace(/\n/g, '<br />')
-    
-    // 9. Code blocks
-    html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>')
+    // 7. Clean up empty paragraphs
+    html = html.replace(/<p class="mt-4"><\/p>/g, '')
     
     return html
   }
@@ -114,7 +116,7 @@ export default function CoatingsPage() {
           setFamilyOptions(data.filterOptions.families || [])
           setProductTypeOptions(data.filterOptions.productTypes || [])
           setProductModelOptions(data.filterOptions.productModels || [])
-          console.log('âœ… Loaded coatings filter options:', data.filterOptions)
+          console.log('✅ Loaded coatings filter options:', data.filterOptions)
         }
       } else {
         console.error('Failed to load coatings filter options:', response.status)
@@ -168,12 +170,12 @@ export default function CoatingsPage() {
       setSearchProgress('Processing results...')
 
       if (data.questionType === 'meta') {
-        console.log('ðŸŽ¯ Meta-question detected:', data.metaType)
+        console.log('🎯 Meta-question detected:', data.metaType)
         setMetaQuestionData(data)
         setSearchProgress(`Meta-question answered in ${elapsed}s`)
         
         if (data.metaType === 'count' && data.filter && data.count > 0) {
-          console.log('ðŸ” Fetching products for filtered count...')
+          console.log('🔍 Fetching products for filtered count...')
           await fetchFilteredProducts(data.filter)
         }
         
@@ -215,7 +217,7 @@ export default function CoatingsPage() {
 
   const fetchFilteredProducts = async (filter: { filterType: string; filterValue: string }) => {
     try {
-      console.log(`ðŸ” Fetching products with ${filter.filterType} = ${filter.filterValue}`)
+      console.log(`🔍 Fetching products with ${filter.filterType} = ${filter.filterValue}`)
       
       const searchQuery = `products in ${filter.filterValue} ${filter.filterType}`
       
@@ -235,7 +237,7 @@ export default function CoatingsPage() {
       if (response.ok) {
         const data = await response.json()
         if (data.products && data.products.length > 0) {
-          console.log(`âœ… Fetched ${data.products.length} products`)
+          console.log(`✅ Fetched ${data.products.length} products`)
           setResults(data.products)
         }
       }
@@ -374,7 +376,7 @@ export default function CoatingsPage() {
                 <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
                 <p className="text-green-700 text-sm">
                   Based on analysis of {analyticalData.count} coating product(s)
-                  {searchTime && <span className="ml-2">â€¢ Completed in {searchTime}s</span>}
+                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
                 </p>
               </div>
             </div>
@@ -404,7 +406,7 @@ export default function CoatingsPage() {
                 className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
-                View Details â†’
+                View Details →
               </button>
             </div>
           </div>
@@ -432,7 +434,7 @@ export default function CoatingsPage() {
                   {metaQuestionData.metaType === 'count' && 'Product count summary'}
                   {metaQuestionData.metaType === 'list' && 'Available product categories'}
                   {metaQuestionData.metaType === 'overview' && 'Complete database overview'}
-                  {searchTime && <span className="ml-2">â€¢ Retrieved in {searchTime}s</span>}
+                  {searchTime && <span className="ml-2">• Retrieved in {searchTime}s</span>}
                 </p>
               </div>
             </div>
@@ -473,7 +475,7 @@ export default function CoatingsPage() {
                 className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
-                View Details â†’
+                View Details →
               </button>
             </div>
           </div>
@@ -508,7 +510,7 @@ export default function CoatingsPage() {
           <h2 className="text-2xl font-bold text-blue-900 mb-2">Coating Product Comparison</h2>
           <p className="text-blue-700">
             Comparing {products.length} coating products - Differences are highlighted
-            {searchTime && <span className="ml-2">â€¢ Completed in {searchTime}s</span>}
+            {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
           </p>
         </div>
 
@@ -655,7 +657,7 @@ export default function CoatingsPage() {
                 <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
                 <p className="text-green-700 text-sm">
                   Based on analysis of {specificAnswer.count} coating product(s)
-                  {searchTime && <span className="ml-2">â€¢ Completed in {searchTime}s</span>}
+                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
                 </p>
               </div>
             </div>
@@ -685,7 +687,7 @@ export default function CoatingsPage() {
                 className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
-                View Details â†’
+                View Details →
               </button>
             </div>
           </div>
@@ -701,7 +703,7 @@ export default function CoatingsPage() {
           Coatings Smart Search
         </h1>
         <p className="text-center text-gray-600 mb-8">
-          Search coating products using natural language â€¢ Powered by AI
+          Search coating products using natural language • Powered by AI
         </p>
 
         <form onSubmit={handleSearch}>
@@ -830,7 +832,7 @@ export default function CoatingsPage() {
                         onClick={() => setSelectedFamily('')}
                         className="ml-2 text-blue-600 hover:text-blue-800"
                       >
-                        Ã—
+                        ×
                       </button>
                     </span>
                   )}
@@ -842,7 +844,7 @@ export default function CoatingsPage() {
                         onClick={() => setSelectedProductType('')}
                         className="ml-2 text-green-600 hover:text-green-800"
                       >
-                        Ã—
+                        ×
                       </button>
                     </span>
                   )}
@@ -854,7 +856,7 @@ export default function CoatingsPage() {
                         onClick={() => setSelectedProductModel('')}
                         className="ml-2 text-purple-600 hover:text-purple-800"
                       >
-                        Ã—
+                        ×
                       </button>
                     </span>
                   )}
@@ -872,7 +874,7 @@ export default function CoatingsPage() {
           {searchProgress && (
             <p className="mt-2 text-sm text-gray-600">{searchProgress}</p>
           )}
-          <p className="mt-2 text-xs text-gray-400">Optimized search â€¢ Typically completes in 2-5 seconds</p>
+          <p className="mt-2 text-xs text-gray-400">Optimized search • Typically completes in 2-5 seconds</p>
         </div>
       )}
 
@@ -906,7 +908,7 @@ export default function CoatingsPage() {
                 <div className="flex items-center gap-4">
                   {searchTime && (
                     <span className="text-sm text-gray-500">
-                      âš¡ {searchTime}s
+                      ⚡ {searchTime}s
                     </span>
                   )}
                   <span className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
