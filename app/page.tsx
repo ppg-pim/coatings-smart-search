@@ -88,7 +88,7 @@ export default function CoatingsPage() {
     // 6. Handle lists within paragraphs
     html = html.replace(/<p class="mt-4">• /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
     html = html.replace(/\n• /g, '</li><li>')
-    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/gs, '</li><li>$1</li></ul>')
+    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/g, '</li><li>$1</li></ul>')
     
     // 7. Clean up empty paragraphs
     html = html.replace(/<p class="mt-4"><\/p>/g, '')
