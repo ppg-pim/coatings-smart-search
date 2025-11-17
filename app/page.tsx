@@ -46,50 +46,50 @@ export default function CoatingsPage() {
     
     // 1. Handle markdown tables FIRST (before other replacements)
     html = html.replace(/\n\|(.+)\|\n\|[-:\s|]+\|\n((?:\|.+\|\n?)+)/g, (match, header, rows) => {
-      const headerCells = header.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
-        `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell.trim()}</th>`
-      ).join('')
+      const headerCells = header.split('|').map((h: string) => h.trim()).filter(Boolean)
+      const rowLines = rows.trim().split('\n')
       
-      const bodyRows = rows.trim().split('\n').map((row: string) => {
-        const cells = row.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
-          `<td class="px-4 py-3 text-sm text-gray-800 border-b border-gray-200">${cell.trim()}</td>`
-        ).join('')
-        return `<tr class="hover:bg-gray-50">${cells}</tr>`
+      const tableRows = rowLines.map((row: string) => {
+        const cells = row.split('|').map((c: string) => c.trim()).filter(Boolean)
+        return `<tr>${cells.map((cell: string) => `<td class="px-4 py-2 border border-gray-300">${cell}</td>`).join('')}</tr>`
       }).join('')
       
-      return `<div class="overflow-x-auto my-6"><table class="min-w-full bg-white border border-gray-300 rounded-lg shadow-sm"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`
+      return `<div class="overflow-x-auto my-4"><table class="min-w-full border-collapse border border-gray-300"><thead><tr>${headerCells.map((h: string) => `<th class="px-4 py-2 bg-gray-100 border border-gray-300 font-semibold">${h}</th>`).join('')}</tr></thead><tbody>${tableRows}</tbody></table></div>`
     })
     
-    // 2. Handle headings (FIXED: No more dynamic classes)
-    html = html.replace(/### (.*?)(\n|$)/g, `<h3 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h3>`)
-    html = html.replace(/## (.*?)(\n|$)/g, `<h2 class="text-2xl font-bold ${color.text} mt-6 mb-4">$1</h2>`)
-    html = html.replace(/# (.*?)(\n|$)/g, `<h1 class="text-3xl font-bold ${color.text} mt-6 mb-4">$1</h1>`)
+    // 2. Headers (must come before bold to avoid conflicts)
+    html = html.replace(/^### (.+)$/gm, `<h3 class="text-lg font-semibold ${color.heading} mt-4 mb-2">$1</h3>`)
+    html = html.replace(/^## (.+)$/gm, `<h2 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h2>`)
+    html = html.replace(/^# (.+)$/gm, `<h1 class="text-2xl font-bold ${color.heading} mt-8 mb-4">$1</h1>`)
     
-    // 3. Handle bold text (FIXED: No more dynamic classes)
-    html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
+    // 3. Bold text
+    html = html.replace(/\*\*(.+?)\*\*/g, `<strong class="font-semibold ${color.bold}">$1</strong>`)
     
-    // 4. Handle bullet lists (convert - to â€¢)
-    html = html.replace(/\n- /g, '\nâ€¢ ')
+    // 4. Italic text
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
     
-    // 5. Handle paragraphs
-    const lines = html.split('\n\n')
-    const processedLines = lines.map(line => {
-      // Skip if already HTML
-      if (line.trim().startsWith('<')) return line
-      // Skip empty lines
-      if (line.trim() === '') return ''
-      // Wrap in paragraph
-      return `<p class="mt-4">${line}</p>`
+    // 5. Bullet points
+    html = html.replace(/^[•\-\*] (.+)$/gm, `<li class="${color.text}">$1</li>`)
+    html = html.replace(/(<li[^>]*>.*<\/li>\n?)+/g, '<ul class="list-disc list-inside space-y-1 my-2">$&</ul>')
+    
+    // 6. Numbered lists
+    html = html.replace(/^\d+\.\s+(.+)$/gm, `<li class="${color.text}">$1</li>`)
+    html = html.replace(/(<li[^>]*>.*<\/li>\n?)+/g, (match) => {
+      if (!match.includes('list-disc')) {
+        return `<ol class="list-decimal list-inside space-y-1 my-2">${match}</ol>`
+      }
+      return match
     })
-    html = processedLines.join('')
     
-    // 6. Handle lists within paragraphs
-    html = html.replace(/<p class="mt-4">â€¢ /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
-    html = html.replace(/\nâ€¢ /g, '</li><li>')
-    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/gs, '</li><li>$1</li></ul>')
+    // 7. Paragraphs (double line breaks)
+    html = html.replace(/\n\n/g, '</p><p class="mb-2">')
+    html = `<p class="mb-2">${html}</p>`
     
-    // 7. Clean up empty paragraphs
-    html = html.replace(/<p class="mt-4"><\/p>/g, '')
+    // 8. Single line breaks
+    html = html.replace(/\n/g, '<br />')
+    
+    // 9. Code blocks
+    html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>')
     
     return html
   }
