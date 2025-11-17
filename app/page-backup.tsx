@@ -10,20 +10,20 @@ export default function CoatingsPage() {
   const [specificAnswer, setSpecificAnswer] = useState<any>(null)
   const [comparisonData, setComparisonData] = useState<any>(null)
   const [analyticalData, setAnalyticalData] = useState<any>(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  const [searchProgress, setSearchProgress] = useState('')
+  const [searchTime, setSearchTime] = useState<number | null>(null)
   
-  // Filter states
   const [selectedFamily, setSelectedFamily] = useState('')
   const [selectedProductType, setSelectedProductType] = useState('')
   const [selectedProductModel, setSelectedProductModel] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   
-  // Available filter options
   const [familyOptions, setFamilyOptions] = useState<string[]>([])
   const [productTypeOptions, setProductTypeOptions] = useState<string[]>([])
   const [productModelOptions, setProductModelOptions] = useState<string[]>([])
   const [loadingFilters, setLoadingFilters] = useState(true)
 
-  // Load filter options on mount - inline version
   useEffect(() => {
     loadFilterOptionsInline()
   }, [])
@@ -31,7 +31,6 @@ export default function CoatingsPage() {
   const loadFilterOptionsInline = async () => {
     setLoadingFilters(true)
     try {
-      // Call the coatings-smart-search API with a special flag to get filter options
       const response = await fetch('/api/coatings-smart-search', {
         method: 'POST',
         headers: {
@@ -69,8 +68,15 @@ export default function CoatingsPage() {
     setSpecificAnswer(null)
     setComparisonData(null)
     setAnalyticalData(null)
+    setHasSearched(true)
+    setSearchProgress('Analyzing your query...')
+    setSearchTime(null)
+
+    const startTime = Date.now()
 
     try {
+      setSearchProgress('Searching database...')
+      
       const response = await fetch('/api/coatings-smart-search', {
         method: 'POST',
         headers: {
@@ -78,45 +84,49 @@ export default function CoatingsPage() {
         },
         body: JSON.stringify({ 
           query,
-          filters: {
-            family: selectedFamily,
-            productType: selectedProductType,
-            productModel: selectedProductModel
-          }
+          family: selectedFamily,
+          productType: selectedProductType,
+          productModel: selectedProductModel
         }),
       })
 
       const data = await response.json()
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+      setSearchTime(parseFloat(elapsed))
 
       if (!response.ok) {
         throw new Error(data.error || 'Search failed')
       }
 
-      // Handle analytical responses
+      setSearchProgress('Processing results...')
+
+      // Handle different response types
       if (data.questionType === 'analytical') {
         setAnalyticalData(data)
-        setResults(data.results || [])
+        setResults(data.products || [])
       }
-      // Handle comparison responses
       else if (data.questionType === 'comparison') {
         setComparisonData(data)
         setResults(data.products || [])
       }
-      // Handle specific question responses
       else if (data.questionType === 'specific') {
         setSpecificAnswer(data)
         if (data.fullProduct) {
           setResults([data.fullProduct])
         }
-      } 
-      // Handle list responses
+      }
+      else if (data.questionType === 'meta') {
+        setAnalyticalData(data)
+        setResults([])
+      }
       else {
-        setResults(data.results || [])
+        setResults(data.products || [])
       }
     } catch (err: any) {
       setError(err.message)
     } finally {
       setLoading(false)
+      setSearchProgress('')
     }
   }
 
@@ -128,7 +138,6 @@ export default function CoatingsPage() {
 
   const hasActiveFilters = selectedFamily || selectedProductType || selectedProductModel
 
-  // Check if value is empty
   const isEmpty = (value: any): boolean => {
     if (value === null || value === undefined) return true
     if (typeof value === 'string' && value.trim() === '') return true
@@ -136,39 +145,49 @@ export default function CoatingsPage() {
     return false
   }
 
-  // Group attributes by category for better display
   const groupAttributes = (product: any) => {
-    const headerFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
-    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable']
+    // Define the EXACT order we want for header fields
+    const headerFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
+    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable', '_sourceTable']
     
     const header: any = {}
     const other: any = {}
     const seen = new Set<string>()
 
+    // First pass: collect all fields
+    const headerCandidates: { [key: string]: any } = {}
+    
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
-      // Skip if already seen, excluded, or empty
       if (seen.has(lowerKey) || excludeFields.includes(lowerKey) || isEmpty(value)) return
       seen.add(lowerKey)
       
-      if (headerFields.includes(lowerKey)) {
-        header[key] = value
+      if (headerFieldsOrder.includes(lowerKey)) {
+        headerCandidates[lowerKey] = { originalKey: key, value }
       } else {
         other[key] = value
+      }
+    })
+
+    // Second pass: add header fields in the desired order
+    headerFieldsOrder.forEach(fieldName => {
+      if (headerCandidates[fieldName]) {
+        const { originalKey, value } = headerCandidates[fieldName]
+        header[originalKey] = value
       }
     })
 
     return { header, other }
   }
 
-  // Format field name for display
   const formatFieldName = (key: string): string => {
     const fieldMappings: { [key: string]: string } = {
       'sku': 'SKU',
       'product_name': 'Product Name',
       'productname': 'Product Name',
       'product_description': 'Description',
+      'description': 'Description',
       'product_model': 'Product Model',
       'productmodel': 'Product Model',
       'product_type': 'Product Type',
@@ -185,7 +204,6 @@ export default function CoatingsPage() {
       .replace(/\b\w/g, (char) => char.toUpperCase())
   }
 
-  // Format date values
   const formatValue = (key: string, value: any): string => {
     const lowerKey = key.toLowerCase()
     if ((lowerKey.includes('created') || lowerKey.includes('updated')) && 
@@ -199,11 +217,10 @@ export default function CoatingsPage() {
     return String(value)
   }
 
-  // Get all unique keys from products for comparison
   const getAllKeys = (products: any[]) => {
     const allKeys = new Set<string>()
     const seenLowerKeys = new Set<string>()
-    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext']
+    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', '_sourceTable']
     
     products.forEach(product => {
       Object.keys(product).forEach(key => {
@@ -217,13 +234,18 @@ export default function CoatingsPage() {
     return Array.from(allKeys)
   }
 
-  // Check if values are different across products
   const isDifferent = (key: string, products: any[]) => {
     const values = products.map(p => p[key])
     return new Set(values).size > 1
   }
 
-  // Render analytical summary
+  const scrollToProducts = () => {
+    const element = document.getElementById('product-references')
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+
   const renderAnalyticalSummary = () => {
     if (!analyticalData) return null
 
@@ -241,6 +263,7 @@ export default function CoatingsPage() {
                 <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
                 <p className="text-green-700 text-sm">
                   Based on analysis of {analyticalData.count} coating product(s)
+                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
                 </p>
               </div>
             </div>
@@ -275,11 +298,9 @@ export default function CoatingsPage() {
                 </span>
               </div>
               <button
-                onClick={() => {
-                  const element = document.getElementById('product-references')
-                  element?.scrollIntoView({ behavior: 'smooth' })
-                }}
-                className="text-sm font-medium text-blue-600 hover:text-blue-800 underline"
+                onClick={scrollToProducts}
+                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
+                type="button"
               >
                 View Details →
               </button>
@@ -290,7 +311,54 @@ export default function CoatingsPage() {
     )
   }
 
-  // Render comparison table
+  const renderMetaSummary = () => {
+    if (!analyticalData || analyticalData.questionType !== 'meta') return null
+
+    return (
+      <div className="mb-8">
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-l-4 border-indigo-500 rounded-lg overflow-hidden shadow-lg">
+          <div className="p-6">
+            <div className="flex items-start mb-4">
+              <div className="flex-shrink-0">
+                <svg className="h-8 w-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-indigo-900 mb-2">Database Information</h2>
+                <p className="text-indigo-700 text-sm">
+                  {analyticalData.metaType === 'count' && 'Product count summary'}
+                  {analyticalData.metaType === 'list' && 'Available product categories'}
+                  {analyticalData.metaType === 'overview' && 'Complete database overview'}
+                  {searchTime && <span className="ml-2">• Retrieved in {searchTime}s</span>}
+                </p>
+              </div>
+            </div>
+            
+            <div className="prose prose-indigo max-w-none">
+              <div 
+                className="text-gray-800 leading-relaxed whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ 
+                  __html: analyticalData.summary
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-900">$1</strong>')
+                    .replace(/### (.*?)(\n|$)/g, '<h3 class="text-lg font-bold text-indigo-900 mt-4 mb-2">$1</h3>')
+                    .replace(/## (.*?)(\n|$)/g, '<h2 class="text-xl font-bold text-indigo-900 mt-4 mb-2">$1</h2>')
+                    .replace(/\n\n/g, '</p><p class="mt-4">')
+                    .replace(/^/, '<p>')
+                    .replace(/$/, '</p>')
+                    .replace(/• /g, '<li class="ml-4">')
+                    .replace(/<\/p><p class="mt-4"><li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1"><li')
+                    .replace(/<li class="ml-4">(.*?)(?=<\/p>|<p|$)/g, '<li class="ml-4">$1</li>')
+                    .replace(/(<\/li>)\s*<p/g, '$1</ul><p')
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderComparison = () => {
     if (!comparisonData || !comparisonData.products || comparisonData.products.length < 2) {
       return null
@@ -299,18 +367,72 @@ export default function CoatingsPage() {
     const products = comparisonData.products
     const allKeys = getAllKeys(products)
     
-    const priorityFields = ['sku', 'product_name', 'productname', 'name', 'description', 'product_description']
+    // FIXED: Ensure proper order for comparison table
+    const priorityFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
     
-    const priority = allKeys.filter(k => priorityFields.includes(k.toLowerCase()))
-    const technical = allKeys.filter(k => !priorityFields.includes(k.toLowerCase()))
+    // Sort priority fields by the defined order
+    const priority = allKeys
+      .filter(k => priorityFieldsOrder.includes(k.toLowerCase()))
+      .sort((a, b) => {
+        const indexA = priorityFieldsOrder.indexOf(a.toLowerCase())
+        const indexB = priorityFieldsOrder.indexOf(b.toLowerCase())
+        return indexA - indexB
+      })
+    
+    const technical = allKeys.filter(k => !priorityFieldsOrder.includes(k.toLowerCase()))
 
     return (
       <div className="mb-8">
         <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 rounded-lg">
           <h2 className="text-2xl font-bold text-blue-900 mb-2">Coating Product Comparison</h2>
-          <p className="text-blue-700">Comparing {products.length} coating products - Differences are highlighted</p>
+          <p className="text-blue-700">
+            Comparing {products.length} coating products - Differences are highlighted
+            {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
+          </p>
         </div>
 
+        {/* AI Comparison Summary */}
+        {comparisonData.summary && (
+          <div className="mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
+            <div className="p-6">
+              <div className="flex items-start mb-4">
+                <div className="flex-shrink-0">
+                  <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <div className="ml-4 flex-1">
+                  <h3 className="text-xl font-bold text-purple-900 mb-2">AI Comparison Analysis</h3>
+                  <p className="text-purple-700 text-sm">
+                    Detailed comparison of {products.length} products
+                  </p>
+                </div>
+              </div>
+              
+              <div className="prose prose-purple max-w-none">
+                <div 
+                  className="text-gray-800 leading-relaxed whitespace-pre-wrap"
+                  dangerouslySetInnerHTML={{ 
+                    __html: comparisonData.summary
+                      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-purple-900">$1</strong>')
+                      .replace(/### (.*?)(\n|$)/g, '<h3 class="text-lg font-bold text-purple-900 mt-4 mb-2">$1</h3>')
+                      .replace(/## (.*?)(\n|$)/g, '<h2 class="text-xl font-bold text-purple-900 mt-4 mb-2">$1</h2>')
+                      .replace(/# (.*?)(\n|$)/g, '<h1 class="text-2xl font-bold text-purple-900 mt-4 mb-2">$1</h1>')
+                      .replace(/\n\n/g, '</p><p class="mt-3">')
+                      .replace(/^(?!<h[123]|<p)/, '<p>')
+                      .replace(/(?<!<\/h[123]>)$/g, '</p>')
+                      .replace(/\n- /g, '<li class="ml-4">')
+                      .replace(/<\/p>\s*<li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1 mb-3"><li')
+                      .replace(/<li class="ml-4">(.*?)(?=<\/p>|<p|$)/g, '<li class="ml-4">$1</li>')
+                      .replace(/(<li.*?<\/li>)\s*<p/g, '$1</ul><p')
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Comparison Table */}
         <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -325,7 +447,10 @@ export default function CoatingsPage() {
                       className="px-6 py-4 text-left text-sm font-semibold"
                       style={{ color: '#0078a9' }}
                     >
-                      Product {idx + 1}
+                      <div className="font-bold">{product.sku || product.Product_Name || `Product ${idx + 1}`}</div>
+                      {product.family && (
+                        <div className="text-xs font-normal text-gray-600 mt-1">Family: {product.family}</div>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -414,7 +539,7 @@ export default function CoatingsPage() {
           Coatings Smart Search
         </h1>
         <p className="text-center text-gray-600 mb-8">
-          Search coating products using natural language
+          Search coating products using natural language • Powered by AI
         </p>
 
         <form onSubmit={handleSearch}>
@@ -423,7 +548,7 @@ export default function CoatingsPage() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask anything... (e.g., 'Best coating for corrosion protection', 'Compare primer options')"
+              placeholder="Ask anything... (e.g., 'Best coating for corrosion protection', 'Compare primer options', 'Tell me about 02GN093')"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
             <button
@@ -446,43 +571,16 @@ export default function CoatingsPage() {
                 </span>
               )}
             </button>
-          {/* Search Button with Spinner */}
-          <button
-            type="submit"
-            disabled={loading || !query.trim()}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2 min-w-[120px]"
-          >
-            {loading ? (
-              <>
-                <svg 
-                  className="animate-spin h-5 w-5 text-white" 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  fill="none" 
-                  viewBox="0 0 24 24"
-                >
-                  <circle 
-                    className="opacity-25" 
-                    cx="12" 
-                    cy="12" 
-                    r="10" 
-                    stroke="currentColor" 
-                    strokeWidth="4"
-                  />
-                  <path 
-                    className="opacity-75" 
-                    fill="currentColor" 
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-                <span>Searching...</span>
-              </>
-            ) : (
-              'Search'
-            )}
-          </button>
+            <button
+              type="submit"
+              disabled={loading || !query.trim()}
+              className="px-8 py-3 text-white rounded-lg hover:opacity-90 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+              style={{ backgroundColor: '#0078a9' }}
+            >
+              {loading ? 'Searching...' : 'Search'}
+            </button>
           </div>
 
-          {/* Filter Panel */}
           {showFilters && (
             <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
               <div className="flex items-center justify-between mb-4">
@@ -501,7 +599,6 @@ export default function CoatingsPage() {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Family Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Family ({familyOptions.length} options)
@@ -521,7 +618,6 @@ export default function CoatingsPage() {
                   </select>
                 </div>
 
-                {/* Product Type Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Type ({productTypeOptions.length} options)
@@ -541,7 +637,6 @@ export default function CoatingsPage() {
                   </select>
                 </div>
 
-                {/* Product Model Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Model ({productModelOptions.length} options)
@@ -561,105 +656,165 @@ export default function CoatingsPage() {
                   </select>
                 </div>
               </div>
+
+              {hasActiveFilters && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="text-sm text-gray-600">Active filters:</span>
+                  {selectedFamily && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                      Family: {selectedFamily}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFamily('')}
+                        className="ml-2 text-blue-600 hover:text-blue-800"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )}
+                  {selectedProductType && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                      Type: {selectedProductType}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProductType('')}
+                        className="ml-2 text-green-600 hover:text-green-800"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )}
+                  {selectedProductModel && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
+                      Model: {selectedProductModel}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProductModel('')}
+                        className="ml-2 text-purple-600 hover:text-purple-800"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </form>
       </div>
 
-      {/* Error Message */}
+      {loading && (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9] mb-4"></div>
+          <p className="text-lg font-medium text-gray-700">Searching coating products...</p>
+          {searchProgress && (
+            <p className="mt-2 text-sm text-gray-600">{searchProgress}</p>
+          )}
+          <p className="mt-2 text-xs text-gray-400">Optimized search • Typically completes in 2-5 seconds</p>
+        </div>
+      )}
+
       {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-lg">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg shadow-sm">
+          <div className="flex items-center">
+            <svg className="h-6 w-6 text-red-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <h3 className="text-lg font-semibold text-red-800">Search Error</h3>
+              <p className="text-red-700 mt-1">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && hasSearched && (
+        <>
+          {renderMetaSummary()}
+          {renderAnalyticalSummary()}
+          {renderComparison()}
+
+          {results.length > 0 && !comparisonData && (
+            <div id="product-references" className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold" style={{ color: '#0078a9' }}>
+                  {analyticalData ? 'Product References' : 'Search Results'}
+                </h2>
+                <div className="flex items-center gap-4">
+                  {searchTime && (
+                    <span className="text-sm text-gray-500">
+                      ⚡ {searchTime}s
+                    </span>
+                  )}
+                  <span className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
+                    {results.length} {results.length === 1 ? 'Product' : 'Products'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {results.map((product, index) => {
+                  const { header, other } = groupAttributes(product)
+                  
+                  return (
+                    <div 
+                      key={index} 
+                      className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow bg-gray-50"
+                    >
+                      <div className="mb-4 pb-4 border-b border-gray-300">
+                        {Object.entries(header).map(([key, value]) => (
+                          <div key={key} className="mb-2">
+                            <span className="font-bold text-lg" style={{ color: '#0078a9' }}>
+                              {formatFieldName(key)}:
+                            </span>
+                            <span className="ml-2 text-gray-800 text-lg">
+                              {formatValue(key, value)}
+                            </span>
+                          </div>
+                        ))}
+                        {product._sourceTable && (
+                          <div className="mt-2">
+                            <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-semibold">
+                              Found in: {product._sourceTable}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {Object.entries(other).map(([key, value]) => (
+                          <div key={key} className="flex flex-col">
+                            <span className="text-sm font-semibold text-gray-600 mb-1">
+                              {formatFieldName(key)}
+                            </span>
+                            <span className="text-sm text-gray-800 bg-white p-2 rounded border border-gray-200">
+                              {formatValue(key, value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {!loading && !error && hasSearched && results.length === 0 && !analyticalData && (
+            <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
+              <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Products Found</h3>
+              <p className="text-gray-600 mb-4">
+                We couldn&apos;t find any coating products matching your search.
+              </p>
+              <p className="text-sm text-gray-500">
+                Try adjusting your search terms or filters, or browse all products.
+              </p>
             </div>
-            <div className="ml-3">
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Analytical Summary */}
-      {renderAnalyticalSummary()}
-
-      {/* Specific Answer */}
-      {specificAnswer && (
-        <div className="mb-8 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-6">
-            <div className="flex items-start mb-4">
-              <div className="flex-shrink-0">
-                <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="ml-4 flex-1">
-                <h2 className="text-2xl font-bold text-purple-900 mb-2">Specific Answer</h2>
-                <p className="text-purple-700 text-sm mb-4">
-                  Product: <span className="font-semibold">{specificAnswer.extractedData?.sku}</span>
-                </p>
-                <div className="prose prose-purple max-w-none">
-                  <div className="text-gray-800 leading-relaxed whitespace-pre-wrap">
-                    {specificAnswer.answer}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Comparison Table */}
-      {renderComparison()}
-
-      {/* Results */}
-      {results.length > 0 && (
-        <div id="product-references" className="bg-white rounded-lg shadow-sm p-6">
-          <h2 className="text-2xl font-bold mb-6" style={{ color: '#0078a9' }}>
-            {analyticalData ? 'Product References' : 'Search Results'} ({results.length})
-          </h2>
-          <div className="space-y-6">
-            {results.map((product, index) => {
-              const { header, other } = groupAttributes(product)
-              return (
-                <div key={index} className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-                  {/* Header Section */}
-                  <div className="mb-4 pb-4 border-b border-gray-200">
-                    {Object.entries(header).map(([key, value]) => (
-                      <div key={key} className="mb-2">
-                        <span className="font-semibold text-gray-700">{formatFieldName(key)}: </span>
-                        <span className="text-gray-900">{formatValue(key, value)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Other Attributes */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
-                    {Object.entries(other).map(([key, value]) => (
-                      <div key={key} className="text-sm">
-                        <span className="font-medium text-gray-600">{formatFieldName(key)}: </span>
-                        <span className="text-gray-800">{formatValue(key, value)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* No Results */}
-      {!loading && !error && results.length === 0 && !specificAnswer && !comparisonData && !analyticalData && query && (
-        <div className="bg-white rounded-lg shadow-sm p-12 text-center">
-          <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No coating products found</h3>
-          <p className="text-gray-600">Try adjusting your search query or filters</p>
-        </div>
+          )}
+        </>
       )}
     </main>
   )

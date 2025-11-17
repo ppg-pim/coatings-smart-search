@@ -24,9 +24,75 @@ export default function CoatingsPage() {
   const [productModelOptions, setProductModelOptions] = useState<string[]>([])
   const [loadingFilters, setLoadingFilters] = useState(true)
 
+  const [metaQuestionData, setMetaQuestionData] = useState<any>(null)
+
   useEffect(() => {
     loadFilterOptionsInline()
   }, [])
+
+  // FIXED: Enhanced markdown rendering function with table support
+  const renderMarkdown = (markdown: string, colorClass: string = 'green'): string => {
+    let html = markdown
+    
+    // Color class mappings (Tailwind-safe - no dynamic classes)
+    const colors: { [key: string]: { heading: string; text: string; bold: string } } = {
+      green: { heading: 'text-green-800', text: 'text-green-900', bold: 'text-green-900' },
+      indigo: { heading: 'text-indigo-800', text: 'text-indigo-900', bold: 'text-indigo-900' },
+      purple: { heading: 'text-purple-800', text: 'text-purple-900', bold: 'text-purple-900' },
+      blue: { heading: 'text-blue-800', text: 'text-blue-900', bold: 'text-blue-900' }
+    }
+    
+    const color = colors[colorClass] || colors.green
+    
+    // 1. Handle markdown tables FIRST (before other replacements)
+    html = html.replace(/\n\|(.+)\|\n\|[-:\s|]+\|\n((?:\|.+\|\n?)+)/g, (match, header, rows) => {
+      const headerCells = header.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
+        `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell.trim()}</th>`
+      ).join('')
+      
+      const bodyRows = rows.trim().split('\n').map((row: string) => {
+        const cells = row.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
+          `<td class="px-4 py-3 text-sm text-gray-800 border-b border-gray-200">${cell.trim()}</td>`
+        ).join('')
+        return `<tr class="hover:bg-gray-50">${cells}</tr>`
+      }).join('')
+      
+      return `<div class="overflow-x-auto my-6"><table class="min-w-full bg-white border border-gray-300 rounded-lg shadow-sm"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`
+    })
+    
+    // 2. Handle headings (FIXED: No more dynamic classes)
+    html = html.replace(/### (.*?)(\n|$)/g, `<h3 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h3>`)
+    html = html.replace(/## (.*?)(\n|$)/g, `<h2 class="text-2xl font-bold ${color.text} mt-6 mb-4">$1</h2>`)
+    html = html.replace(/# (.*?)(\n|$)/g, `<h1 class="text-3xl font-bold ${color.text} mt-6 mb-4">$1</h1>`)
+    
+    // 3. Handle bold text (FIXED: No more dynamic classes)
+    html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
+    
+    // 4. Handle bullet lists (convert - to â€¢)
+    html = html.replace(/\n- /g, '\nâ€¢ ')
+    
+    // 5. Handle paragraphs
+    const lines = html.split('\n\n')
+    const processedLines = lines.map(line => {
+      // Skip if already HTML
+      if (line.trim().startsWith('<')) return line
+      // Skip empty lines
+      if (line.trim() === '') return ''
+      // Wrap in paragraph
+      return `<p class="mt-4">${line}</p>`
+    })
+    html = processedLines.join('')
+    
+    // 6. Handle lists within paragraphs
+    html = html.replace(/<p class="mt-4">â€¢ /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
+    html = html.replace(/\nâ€¢ /g, '</li><li>')
+    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/gs, '</li><li>$1</li></ul>')
+    
+    // 7. Clean up empty paragraphs
+    html = html.replace(/<p class="mt-4"><\/p>/g, '')
+    
+    return html
+  }
 
   const loadFilterOptionsInline = async () => {
     setLoadingFilters(true)
@@ -48,7 +114,7 @@ export default function CoatingsPage() {
           setFamilyOptions(data.filterOptions.families || [])
           setProductTypeOptions(data.filterOptions.productTypes || [])
           setProductModelOptions(data.filterOptions.productModels || [])
-          console.log('✅ Loaded coatings filter options:', data.filterOptions)
+          console.log('âœ… Loaded coatings filter options:', data.filterOptions)
         }
       } else {
         console.error('Failed to load coatings filter options:', response.status)
@@ -68,6 +134,7 @@ export default function CoatingsPage() {
     setSpecificAnswer(null)
     setComparisonData(null)
     setAnalyticalData(null)
+    setMetaQuestionData(null)
     setHasSearched(true)
     setSearchProgress('Analyzing your query...')
     setSearchTime(null)
@@ -100,7 +167,20 @@ export default function CoatingsPage() {
 
       setSearchProgress('Processing results...')
 
-      // Handle different response types
+      if (data.questionType === 'meta') {
+        console.log('ðŸŽ¯ Meta-question detected:', data.metaType)
+        setMetaQuestionData(data)
+        setSearchProgress(`Meta-question answered in ${elapsed}s`)
+        
+        if (data.metaType === 'count' && data.filter && data.count > 0) {
+          console.log('ðŸ” Fetching products for filtered count...')
+          await fetchFilteredProducts(data.filter)
+        }
+        
+        setLoading(false)
+        return
+      }
+
       if (data.questionType === 'analytical') {
         setAnalyticalData(data)
         setResults(data.products || [])
@@ -115,18 +195,52 @@ export default function CoatingsPage() {
           setResults([data.fullProduct])
         }
       }
-      else if (data.questionType === 'meta') {
-        setAnalyticalData(data)
-        setResults([])
-      }
       else {
         setResults(data.products || [])
+        if (data.summary) {
+          setSpecificAnswer({
+            summary: data.summary,
+            count: data.count || 0,
+            totalFound: data.totalFound || 0
+          })
+        }
       }
     } catch (err: any) {
       setError(err.message)
     } finally {
       setLoading(false)
       setSearchProgress('')
+    }
+  }
+
+  const fetchFilteredProducts = async (filter: { filterType: string; filterValue: string }) => {
+    try {
+      console.log(`ðŸ” Fetching products with ${filter.filterType} = ${filter.filterValue}`)
+      
+      const searchQuery = `products in ${filter.filterValue} ${filter.filterType}`
+      
+      const response = await fetch('/api/coatings-smart-search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          query: searchQuery,
+          family: filter.filterType === 'family' ? filter.filterValue : '',
+          productType: filter.filterType === 'type' ? filter.filterValue : '',
+          productModel: filter.filterType === 'model' ? filter.filterValue : ''
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.products && data.products.length > 0) {
+          console.log(`âœ… Fetched ${data.products.length} products`)
+          setResults(data.products)
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching filtered products:', err)
     }
   }
 
@@ -146,7 +260,6 @@ export default function CoatingsPage() {
   }
 
   const groupAttributes = (product: any) => {
-    // Define the EXACT order we want for header fields
     const headerFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
     const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable', '_sourceTable']
     
@@ -154,7 +267,6 @@ export default function CoatingsPage() {
     const other: any = {}
     const seen = new Set<string>()
 
-    // First pass: collect all fields
     const headerCandidates: { [key: string]: any } = {}
     
     Object.entries(product).forEach(([key, value]) => {
@@ -170,7 +282,6 @@ export default function CoatingsPage() {
       }
     })
 
-    // Second pass: add header fields in the desired order
     headerFieldsOrder.forEach(fieldName => {
       if (headerCandidates[fieldName]) {
         const { originalKey, value } = headerCandidates[fieldName]
@@ -263,24 +374,15 @@ export default function CoatingsPage() {
                 <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
                 <p className="text-green-700 text-sm">
                   Based on analysis of {analyticalData.count} coating product(s)
-                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
+                  {searchTime && <span className="ml-2">â€¢ Completed in {searchTime}s</span>}
                 </p>
               </div>
             </div>
             
             <div className="prose prose-green max-w-none">
               <div 
-                className="text-gray-800 leading-relaxed whitespace-pre-wrap"
-                dangerouslySetInnerHTML={{ 
-                  __html: analyticalData.summary
-                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-green-900">$1</strong>')
-                    .replace(/\n\n/g, '</p><p class="mt-4">')
-                    .replace(/^/, '<p>')
-                    .replace(/$/, '</p>')
-                    .replace(/• /g, '<li class="ml-4">')
-                    .replace(/<\/p><p class="mt-4"><li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1"><li')
-                    .replace(/<li class="ml-4">(.*?)<\/p>/g, '<li class="ml-4">$1</li></ul><p class="mt-4">')
-                }}
+                className="text-gray-800 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(analyticalData.summary, 'green') }}
               />
             </div>
           </div>
@@ -302,7 +404,7 @@ export default function CoatingsPage() {
                 className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
-                View Details →
+                View Details â†’
               </button>
             </div>
           </div>
@@ -312,7 +414,7 @@ export default function CoatingsPage() {
   }
 
   const renderMetaSummary = () => {
-    if (!analyticalData || analyticalData.questionType !== 'meta') return null
+    if (!metaQuestionData) return null
 
     return (
       <div className="mb-8">
@@ -327,34 +429,55 @@ export default function CoatingsPage() {
               <div className="ml-4 flex-1">
                 <h2 className="text-2xl font-bold text-indigo-900 mb-2">Database Information</h2>
                 <p className="text-indigo-700 text-sm">
-                  {analyticalData.metaType === 'count' && 'Product count summary'}
-                  {analyticalData.metaType === 'list' && 'Available product categories'}
-                  {analyticalData.metaType === 'overview' && 'Complete database overview'}
-                  {searchTime && <span className="ml-2">• Retrieved in {searchTime}s</span>}
+                  {metaQuestionData.metaType === 'count' && 'Product count summary'}
+                  {metaQuestionData.metaType === 'list' && 'Available product categories'}
+                  {metaQuestionData.metaType === 'overview' && 'Complete database overview'}
+                  {searchTime && <span className="ml-2">â€¢ Retrieved in {searchTime}s</span>}
                 </p>
               </div>
             </div>
             
             <div className="prose prose-indigo max-w-none">
               <div 
-                className="text-gray-800 leading-relaxed whitespace-pre-wrap"
-                dangerouslySetInnerHTML={{ 
-                  __html: analyticalData.summary
-                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-900">$1</strong>')
-                    .replace(/### (.*?)(\n|$)/g, '<h3 class="text-lg font-bold text-indigo-900 mt-4 mb-2">$1</h3>')
-                    .replace(/## (.*?)(\n|$)/g, '<h2 class="text-xl font-bold text-indigo-900 mt-4 mb-2">$1</h2>')
-                    .replace(/\n\n/g, '</p><p class="mt-4">')
-                    .replace(/^/, '<p>')
-                    .replace(/$/, '</p>')
-                    .replace(/• /g, '<li class="ml-4">')
-                    .replace(/<\/p><p class="mt-4"><li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1"><li')
-                    .replace(/<li class="ml-4">(.*?)(?=<\/p>|<p|$)/g, '<li class="ml-4">$1</li>')
-                    .replace(/(<\/li>)\s*<p/g, '$1</ul><p')
-                }}
+                className="text-gray-800 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(metaQuestionData.summary, 'indigo') }}
               />
             </div>
+
+            {metaQuestionData.count !== undefined && (
+              <div className="mt-4 pt-4 border-t border-indigo-200">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-indigo-700">Total Count:</span>
+                  <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full font-semibold">
+                    {metaQuestionData.count.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
+
+        {results.length > 0 && (
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-blue-900">
+                  {results.length} coating product reference{results.length !== 1 ? 's' : ''} available below
+                </span>
+              </div>
+              <button
+                onClick={scrollToProducts}
+                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
+                type="button"
+              >
+                View Details â†’
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -367,10 +490,8 @@ export default function CoatingsPage() {
     const products = comparisonData.products
     const allKeys = getAllKeys(products)
     
-    // FIXED: Ensure proper order for comparison table
     const priorityFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
     
-    // Sort priority fields by the defined order
     const priority = allKeys
       .filter(k => priorityFieldsOrder.includes(k.toLowerCase()))
       .sort((a, b) => {
@@ -387,11 +508,10 @@ export default function CoatingsPage() {
           <h2 className="text-2xl font-bold text-blue-900 mb-2">Coating Product Comparison</h2>
           <p className="text-blue-700">
             Comparing {products.length} coating products - Differences are highlighted
-            {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
+            {searchTime && <span className="ml-2">â€¢ Completed in {searchTime}s</span>}
           </p>
         </div>
 
-        {/* AI Comparison Summary */}
         {comparisonData.summary && (
           <div className="mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
             <div className="p-6">
@@ -411,28 +531,14 @@ export default function CoatingsPage() {
               
               <div className="prose prose-purple max-w-none">
                 <div 
-                  className="text-gray-800 leading-relaxed whitespace-pre-wrap"
-                  dangerouslySetInnerHTML={{ 
-                    __html: comparisonData.summary
-                      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-purple-900">$1</strong>')
-                      .replace(/### (.*?)(\n|$)/g, '<h3 class="text-lg font-bold text-purple-900 mt-4 mb-2">$1</h3>')
-                      .replace(/## (.*?)(\n|$)/g, '<h2 class="text-xl font-bold text-purple-900 mt-4 mb-2">$1</h2>')
-                      .replace(/# (.*?)(\n|$)/g, '<h1 class="text-2xl font-bold text-purple-900 mt-4 mb-2">$1</h1>')
-                      .replace(/\n\n/g, '</p><p class="mt-3">')
-                      .replace(/^(?!<h[123]|<p)/, '<p>')
-                      .replace(/(?<!<\/h[123]>)$/g, '</p>')
-                      .replace(/\n- /g, '<li class="ml-4">')
-                      .replace(/<\/p>\s*<li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1 mb-3"><li')
-                      .replace(/<li class="ml-4">(.*?)(?=<\/p>|<p|$)/g, '<li class="ml-4">$1</li>')
-                      .replace(/(<li.*?<\/li>)\s*<p/g, '$1</ul><p')
-                  }}
+                  className="text-gray-800 leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(comparisonData.summary, 'purple') }}
                 />
               </div>
             </div>
           </div>
         )}
 
-        {/* Comparison Table */}
         <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -532,6 +638,62 @@ export default function CoatingsPage() {
     )
   }
 
+  const renderLookupSummary = () => {
+    if (!specificAnswer || comparisonData || analyticalData || metaQuestionData) return null
+
+    return (
+      <div className="mb-8">
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-lg overflow-hidden shadow-lg">
+          <div className="p-6">
+            <div className="flex items-start mb-4">
+              <div className="flex-shrink-0">
+                <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
+                <p className="text-green-700 text-sm">
+                  Based on analysis of {specificAnswer.count} coating product(s)
+                  {searchTime && <span className="ml-2">â€¢ Completed in {searchTime}s</span>}
+                </p>
+              </div>
+            </div>
+            
+            <div className="prose prose-green max-w-none">
+              <div 
+                className="text-gray-800 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(specificAnswer.summary, 'green') }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {specificAnswer.count > 0 && (
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-blue-900">
+                  {specificAnswer.count} coating product reference{specificAnswer.count !== 1 ? 's' : ''} available below
+                </span>
+              </div>
+              <button
+                onClick={scrollToProducts}
+                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
+                type="button"
+              >
+                View Details â†’
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto bg-gray-50">
       <div className="bg-white rounded-lg shadow-sm p-8 mb-8">
@@ -539,7 +701,7 @@ export default function CoatingsPage() {
           Coatings Smart Search
         </h1>
         <p className="text-center text-gray-600 mb-8">
-          Search coating products using natural language • Powered by AI
+          Search coating products using natural language â€¢ Powered by AI
         </p>
 
         <form onSubmit={handleSearch}>
@@ -548,7 +710,7 @@ export default function CoatingsPage() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask anything... (e.g., 'Best coating for corrosion protection', 'Compare primer options', 'Tell me about 02GN093')"
+              placeholder="Ask anything... (e.g., 'Best coating for corrosion protection', 'Compare CA 8110 and CA 8200', 'Tell me about 02GN093')"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
             <button
@@ -668,7 +830,7 @@ export default function CoatingsPage() {
                         onClick={() => setSelectedFamily('')}
                         className="ml-2 text-blue-600 hover:text-blue-800"
                       >
-                        ×
+                        Ã—
                       </button>
                     </span>
                   )}
@@ -680,7 +842,7 @@ export default function CoatingsPage() {
                         onClick={() => setSelectedProductType('')}
                         className="ml-2 text-green-600 hover:text-green-800"
                       >
-                        ×
+                        Ã—
                       </button>
                     </span>
                   )}
@@ -692,7 +854,7 @@ export default function CoatingsPage() {
                         onClick={() => setSelectedProductModel('')}
                         className="ml-2 text-purple-600 hover:text-purple-800"
                       >
-                        ×
+                        Ã—
                       </button>
                     </span>
                   )}
@@ -710,7 +872,7 @@ export default function CoatingsPage() {
           {searchProgress && (
             <p className="mt-2 text-sm text-gray-600">{searchProgress}</p>
           )}
-          <p className="mt-2 text-xs text-gray-400">Optimized search • Typically completes in 2-5 seconds</p>
+          <p className="mt-2 text-xs text-gray-400">Optimized search â€¢ Typically completes in 2-5 seconds</p>
         </div>
       )}
 
@@ -732,18 +894,19 @@ export default function CoatingsPage() {
         <>
           {renderMetaSummary()}
           {renderAnalyticalSummary()}
+          {renderLookupSummary()}
           {renderComparison()}
 
           {results.length > 0 && !comparisonData && (
             <div id="product-references" className="bg-white rounded-lg shadow-sm p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold" style={{ color: '#0078a9' }}>
-                  {analyticalData ? 'Product References' : 'Search Results'}
+                  {analyticalData || metaQuestionData ? 'Product References' : 'Search Results'}
                 </h2>
                 <div className="flex items-center gap-4">
                   {searchTime && (
                     <span className="text-sm text-gray-500">
-                      ⚡ {searchTime}s
+                      âš¡ {searchTime}s
                     </span>
                   )}
                   <span className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
@@ -767,9 +930,10 @@ export default function CoatingsPage() {
                             <span className="font-bold text-lg" style={{ color: '#0078a9' }}>
                               {formatFieldName(key)}:
                             </span>
-                            <span className="ml-2 text-gray-800 text-lg">
-                              {formatValue(key, value)}
-                            </span>
+                            <span 
+                              className="ml-2 text-gray-800 text-lg"
+                              dangerouslySetInnerHTML={{ __html: formatValue(key, value) }}
+                            />
                           </div>
                         ))}
                         {product._sourceTable && (
@@ -787,9 +951,10 @@ export default function CoatingsPage() {
                             <span className="text-sm font-semibold text-gray-600 mb-1">
                               {formatFieldName(key)}
                             </span>
-                            <span className="text-sm text-gray-800 bg-white p-2 rounded border border-gray-200">
-                              {formatValue(key, value)}
-                            </span>
+                            <span 
+                              className="text-sm text-gray-800 bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap"
+                              dangerouslySetInnerHTML={{ __html: formatValue(key, value) }}
+                            />
                           </div>
                         ))}
                       </div>
@@ -800,7 +965,7 @@ export default function CoatingsPage() {
             </div>
           )}
 
-          {!loading && !error && hasSearched && results.length === 0 && !analyticalData && (
+          {!loading && !error && hasSearched && results.length === 0 && !analyticalData && !metaQuestionData && (
             <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
               <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
