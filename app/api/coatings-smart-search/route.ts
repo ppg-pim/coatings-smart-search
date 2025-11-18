@@ -12,11 +12,16 @@ const openai = new OpenAI({ apiKey: openaiApiKey })
 // Types
 type ProductRecord = Record<string, any>
 
-interface SearchParams {
-  questionType: 'lookup' | 'comparison' | 'analytical'
-  searchKeywords: string[]
-  requireAllKeywords: boolean
-  useBatchFetch: boolean
+interface AISearchIntent {
+  questionType: 'lookup' | 'comparison' | 'analytical' | 'meta'
+  searchTerms: string[]
+  metaType?: 'count' | 'list' | 'overview'
+  filters?: {
+    family?: string
+    productType?: string
+    productModel?: string
+  }
+  reasoning: string
 }
 
 // Clean product data by removing null/undefined and normalizing
@@ -145,151 +150,167 @@ async function getFilterOptions(supabaseClient: any): Promise<any> {
   }
 }
 
-// Detect meta-questions about the database itself
-function detectMetaQuestion(query: string): { isMeta: boolean; type: string | null } {
-  const lowerQuery = query.toLowerCase().trim()
+// 🤖 AI-POWERED QUERY PARSER - Let ChatGPT understand the user's intent
+async function parseQueryWithAI(
+  query: string,
+  availableFamilies: string[],
+  availableTypes: string[],
+  userFilters: { family?: string; productType?: string; productModel?: string }
+): Promise<AISearchIntent> {
+  console.log(`🤖 Using AI to parse query: "${query}"`)
   
-  const hasProductCode = /\b[0-9][a-z0-9]{4,}\b/i.test(lowerQuery)
-  if (hasProductCode) {
-    return { isMeta: false, type: null }
-  }
-  
-  if (
-    lowerQuery.match(/how many (products?|items?|coatings?|entries?)/) ||
-    lowerQuery.match(/total (number of )?(products?|items?|coatings?)/) ||
-    lowerQuery.match(/count (of )?(products?|items?|coatings?)/)
-  ) {
-    return { isMeta: true, type: 'count' }
-  }
-  
-  if (
-    lowerQuery.match(/what (are the |kinds of |types of )?(families|family|types?|categories)/) ||
-    lowerQuery.match(/list (all )?(families|family|types?|categories|products?)/) ||
-    lowerQuery.match(/show (me )?(all )?(families|family|types?|categories)/)
-  ) {
-    return { isMeta: true, type: 'list' }
-  }
-  
-  if (
-    lowerQuery.match(/what('s| is) in (the |this )?database/) ||
-    lowerQuery.match(/tell me about (the |this )?database/) ||
-    lowerQuery.match(/database (info|information|overview|summary)/)
-  ) {
-    return { isMeta: true, type: 'overview' }
-  }
-  
-  return { isMeta: false, type: null }
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini', // Faster and cheaper for parsing
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert query parser for an aerospace coatings database. Your job is to analyze user queries and extract search intent.
+
+**DATABASE STRUCTURE:**
+- Products have: SKU, family, Product_Name, Product_Type, Product_Model, and various technical specifications
+- Available families: ${availableFamilies.slice(0, 20).join(', ')}${availableFamilies.length > 20 ? '...' : ''}
+- Available types: ${availableTypes.slice(0, 15).join(', ')}${availableTypes.length > 15 ? '...' : ''}
+
+**YOUR TASK:**
+Analyze the user's query and return a JSON object with:
+1. **questionType**: 'lookup' | 'comparison' | 'analytical' | 'meta'
+   - lookup: User wants specific product(s) info
+   - comparison: User wants to compare 2+ products
+   - analytical: User asks "what", "how", "best", "recommend"
+   - meta: User asks about database itself (count, list, overview)
+
+2. **searchTerms**: Array of product names, SKUs, or keywords to search for
+   - For comparisons: Extract FULL product names (e.g., ["CA8000 Solar Reflective Topcoat", "CA8000 Solar Reflective Non-Metal Topcoat"])
+   - For lookups: Extract product codes or key terms (e.g., ["CA8100", "primer"])
+   - For analytical: Extract key concepts (e.g., ["corrosion protection", "high temperature"])
+
+3. **metaType**: If questionType is 'meta', specify: 'count' | 'list' | 'overview'
+
+4. **filters**: Detect any family/type/model filters mentioned
+   - family: Look for product family codes (e.g., CA8000, 44GN)
+   - productType: Look for types like "primer", "topcoat", "sealer"
+   - productModel: Look for specific models
+
+5. **reasoning**: Brief explanation of your analysis
+
+**EXAMPLES:**
+
+Query: "compare CA8000 Solar Reflective Topcoat to CA8000 Solar Reflective Non-Metal Topcoat"
+Response: {
+  "questionType": "comparison",
+  "searchTerms": ["CA8000 Solar Reflective Topcoat", "CA8000 Solar Reflective Non-Metal Topcoat"],
+  "filters": { "family": "CA8000" },
+  "reasoning": "User wants to compare two specific CA8000 products with different characteristics"
 }
 
-// Detect if meta-question includes filters
-function detectFilteredMetaQuestion(query: string): { 
-  hasFilter: boolean; 
-  filterType: 'family' | 'type' | 'model' | null;
-  filterValue: string | null;
-} {
-  const lowerQuery = query.toLowerCase().trim()
-  
-  const hasProductCode = /\b[0-9][a-z0-9]{4,}\b/i.test(lowerQuery)
-  if (hasProductCode) {
-    return { hasFilter: false, filterType: null, filterValue: null }
-  }
-  
-  const familyMatch = lowerQuery.match(/(?:in|for|with|associated (?:to|with)|from|of|within)\s+(?:the\s+)?([a-z0-9]+)\s+family/i)
-  if (familyMatch) {
-    return { 
-      hasFilter: true, 
-      filterType: 'family', 
-      filterValue: familyMatch[1].toUpperCase() 
+Query: "what is the mix ratio of CA 8100"
+Response: {
+  "questionType": "lookup",
+  "searchTerms": ["CA8100", "CA 8100"],
+  "reasoning": "User looking for specific technical specification (mix ratio) of CA 8100 product"
+}
+
+Query: "best coating for corrosion protection"
+Response: {
+  "questionType": "analytical",
+  "searchTerms": ["corrosion protection", "corrosion resistant", "anti-corrosion"],
+  "reasoning": "User seeking recommendations based on application requirement"
+}
+
+Query: "how many products are in the CA8000 family"
+Response: {
+  "questionType": "meta",
+  "metaType": "count",
+  "searchTerms": [],
+  "filters": { "family": "CA8000" },
+  "reasoning": "User asking for database statistics about CA8000 family"
+}
+
+Query: "44GN060 vs 44GN057"
+Response: {
+  "questionType": "comparison",
+  "searchTerms": ["44GN060", "44GN057"],
+  "filters": { "family": "44GN" },
+  "reasoning": "User wants to compare two products from 44GN family"
+}
+
+**IMPORTANT:**
+- For comparison queries, extract COMPLETE product names, not fragments
+- Be generous with search terms - include variations and synonyms
+- Detect family codes even if not explicitly stated
+- Return valid JSON only, no markdown or explanations`
+        },
+        {
+          role: 'user',
+          content: `Parse this query: "${query}"
+
+${userFilters.family ? `User has already filtered by family: ${userFilters.family}` : ''}
+${userFilters.productType ? `User has already filtered by type: ${userFilters.productType}` : ''}
+${userFilters.productModel ? `User has already filtered by model: ${userFilters.productModel}` : ''}
+
+Return JSON only.`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 500,
+      response_format: { type: 'json_object' }
+    })
+    
+    const aiResponse = completion.choices[0].message.content || '{}'
+    const parsed: AISearchIntent = JSON.parse(aiResponse)
+    
+    console.log(`✅ AI parsed intent:`, JSON.stringify(parsed, null, 2))
+    
+    return parsed
+    
+  } catch (error: any) {
+    console.error('❌ AI parsing failed:', error.message)
+    
+    // Fallback to basic parsing
+    const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+    return {
+      questionType: 'lookup',
+      searchTerms: words,
+      reasoning: 'Fallback parsing due to AI error'
     }
   }
-  
-  const areTypeMatch = lowerQuery.match(/(?:how many|total|count).*?(?:products?|items?|coatings?).*?(?:are|is)\s+([a-z0-9\s]+?)(?:\s+(?:in|from|for|at|on|with|within|of)\s|\s*$|\?)/i)
-  if (areTypeMatch) {
-    const potentialType = areTypeMatch[1].trim()
-    if (potentialType.length > 0) {
-      console.log(`🎯 Detected "are [TYPE]" pattern: "${potentialType}"`)
-      return { 
-        hasFilter: true, 
-        filterType: 'type', 
-        filterValue: potentialType 
-      }
-    }
-  }
-  
-  const typeMatch = lowerQuery.match(/(?:in|for|with|of)\s+(?:the\s+)?([a-z0-9\s]+?)\s+(?:type|product type)/i)
-  if (typeMatch) {
-    return { 
-      hasFilter: true, 
-      filterType: 'type', 
-      filterValue: typeMatch[1].trim() 
-    }
-  }
-  
-  const modelMatch = lowerQuery.match(/(?:in|for|with|of)\s+(?:the\s+)?([a-z0-9\s]+?)\s+(?:model|product model)/i)
-  if (modelMatch) {
-    return { 
-      hasFilter: true, 
-      filterType: 'model', 
-      filterValue: modelMatch[1].trim() 
-    }
-  }
-  
-  return { hasFilter: false, filterType: null, filterValue: null }
 }
 
 // Handle meta-questions
 async function handleMetaQuestion(
-  type: string,
-  query: string,
-  supabaseClient: any,
-  filterInfo?: { filterType: string; filterValue: string }
+  metaType: string,
+  filters: { family?: string; productType?: string; productModel?: string },
+  supabaseClient: any
 ): Promise<any> {
-  console.log(`🔍 Handling meta-question type: ${type}`)
-  if (filterInfo) {
-    console.log(`🎯 With filter: ${filterInfo.filterType} = ${filterInfo.filterValue}`)
-  }
+  console.log(`🔍 Handling meta-question type: ${metaType}`)
+  console.log(`🎯 With filters:`, filters)
   
   try {
-    if (type === 'count') {
+    if (metaType === 'count') {
       let countQuery = supabaseClient
         .from('coatings')
         .select('*', { count: 'exact', head: true })
       
-      if (filterInfo) {
-        const { filterType, filterValue } = filterInfo
-        
-        if (filterType === 'family') {
-          countQuery = countQuery.eq('family', filterValue)
-        } else if (filterType === 'type') {
-          countQuery = countQuery.ilike('Product_Type', filterValue)
-        } else if (filterType === 'model') {
-          countQuery = countQuery.eq('Product_Model', filterValue)
-        }
-      }
+      if (filters.family) countQuery = countQuery.eq('family', filters.family)
+      if (filters.productType) countQuery = countQuery.ilike('Product_Type', `%${filters.productType}%`)
+      if (filters.productModel) countQuery = countQuery.eq('Product_Model', filters.productModel)
       
       const { count, error } = await countQuery
       
-      if (error) {
-        console.error('❌ Error counting products:', error)
-        throw error
-      }
+      if (error) throw error
       
       console.log(`✅ Total products: ${count}`)
       
-      let summary: string
-      if (filterInfo) {
-        const { filterType, filterValue } = filterInfo
-        summary = `**Filtered Product Count**
-
-I found **${(count || 0).toLocaleString()} coating product${count === 1 ? '' : 's'}** with ${filterType} **"${filterValue}"**.
-
-${count === 0 ? `⚠️ No products found matching this ${filterType}.` : `This represents all products in the ${filterValue} ${filterType}.`}`
+      let summary = `**Product Count**\n\nI found **${(count || 0).toLocaleString()} coating product${count === 1 ? '' : 's'}**`
+      
+      if (filters.family || filters.productType || filters.productModel) {
+        summary += ' matching your criteria:\n'
+        if (filters.family) summary += `\n• Family: **${filters.family}**`
+        if (filters.productType) summary += `\n• Type: **${filters.productType}**`
+        if (filters.productModel) summary += `\n• Model: **${filters.productModel}**`
       } else {
-        summary = `**Database Product Count**
-
-I found **${(count || 0).toLocaleString()} coating products** in the database.
-
-This represents the complete inventory of coating products available for search.`
+        summary += ' in the database.'
       }
       
       return {
@@ -298,12 +319,11 @@ This represents the complete inventory of coating products available for search.
         metaType: 'count',
         summary,
         count: count || 0,
-        results: [],
-        filter: filterInfo || null
+        results: []
       }
     }
     
-    if (type === 'list') {
+    if (metaType === 'list') {
       const { data: familyData } = await supabaseClient
         .from('coatings')
         .select('family')
@@ -319,19 +339,15 @@ This represents the complete inventory of coating products available for search.
       const families = [...new Set(familyData?.map((r: any) => r.family).filter(Boolean))].sort()
       const types = [...new Set(typeData?.map((r: any) => r.Product_Type).filter(Boolean))].sort()
       
-      console.log(`✅ Found ${families.length} families, ${types.length} types`)
-      
-      const summary = `**Product Categories Overview**
+      const summary = `**Product Categories**
 
-**Product Families (${families.length} total):**
+**Families (${families.length}):**
 ${families.slice(0, 20).map(f => `• ${f}`).join('\n')}
 ${families.length > 20 ? `\n_...and ${families.length - 20} more_` : ''}
 
-**Product Types (${types.length} total):**
+**Types (${types.length}):**
 ${types.slice(0, 15).map(t => `• ${t}`).join('\n')}
-${types.length > 15 ? `\n_...and ${types.length - 15} more_` : ''}
-
-You can filter by any of these categories using the filter options in the search interface.`
+${types.length > 15 ? `\n_...and ${types.length - 15} more_` : ''}`
       
       return {
         success: true,
@@ -344,7 +360,7 @@ You can filter by any of these categories using the filter options in the search
       }
     }
     
-    if (type === 'overview') {
+    if (metaType === 'overview') {
       const { count } = await supabaseClient
         .from('coatings')
         .select('*', { count: 'exact', head: true })
@@ -360,20 +376,19 @@ You can filter by any of these categories using the filter options in the search
       const summary = `**Coatings Database Overview**
 
 **Total Products:** ${(count || 0).toLocaleString()} coating products
-
-**Product Families:** ${families.length} unique families including ${families.slice(0, 5).join(', ')}, and more.
+**Product Families:** ${families.length} unique families
 
 **Search Capabilities:**
-• Natural language search across all product specifications
-• Compare products side-by-side
+• Natural language search powered by AI
+• Product comparisons with detailed analysis
 • Filter by family, type, and model
-• AI-powered product recommendations
+• Technical specification lookup
 
 **Example Queries:**
 • "Best coating for corrosion protection"
-• "Compare 44GN011 vs 44GN07"
-• "Show me all primers"
-• "What products are in the CA7000 family?"`
+• "Compare CA8000 Solar Reflective Topcoat to CA8000 Non-Metal Topcoat"
+• "What is the mix ratio of CA 8100"
+• "Show me all primers in the 44GN family"`
       
       return {
         success: true,
@@ -387,221 +402,132 @@ You can filter by any of these categories using the filter options in the search
     }
     
   } catch (error: any) {
-    console.error('❌ Meta-question handler error:', error)
+    console.error('❌ Meta-question error:', error)
     throw error
   }
   
   return null
 }
 
-// Parse user query to determine search strategy
-function parseSearchQuery(query: string): SearchParams {
-  let processedQuery = query
-  const concatenatedPattern = /([a-z0-9]+)(to|vs|versus)([a-z0-9]+)/gi
-  processedQuery = processedQuery.replace(concatenatedPattern, '$1 $2 $3')
-  
-  console.log(`📝 Processed query: "${processedQuery}"`)
-  
-  const comparisonPatterns = [
-    /compare\s+([a-z0-9\s]+?)\s*(?:vs\.?|versus|and|with|to)\s*([a-z0-9\s]+?)(?:\s|$)/i,
-    /\b([a-z0-9]{5,})\s*(?:vs\.?|versus|to)\s*([a-z0-9]{5,})\b/i,
-    /(?:difference|different)\s+between\s+([a-z0-9\s]+?)\s+and\s+([a-z0-9\s]+?)(?:\s|$)/i,
-    /what.*?(?:difference|different).*?between\s+([a-z0-9\s]+?)\s+and\s+([a-z0-9\s]+?)(?:\s|$)/i,
-    /show.*?(?:difference|different).*?between\s+([a-z0-9\s]+?)\s+and\s+([a-z0-9\s]+?)(?:\s|$)/i,
-    /([a-z0-9]+)\s+and\s+([a-z0-9]+)\s+(?:comparison|compare|difference|different)/i,
-    /\b([a-z0-9]{5,})\s+or\s+([a-z0-9]{5,})\b/i
-  ]
-  
-  for (const pattern of comparisonPatterns) {
-    const match = processedQuery.match(pattern)
-    if (match) {
-      const keywords = [match[1].trim(), match[2].trim()].filter(k => k && k.length > 0)
-      
-      if (keywords.length >= 2) {
-        console.log(`🔍 Detected comparison: ${keywords.join(' vs ')}`)
-        return {
-          questionType: 'comparison',
-          searchKeywords: keywords,
-          requireAllKeywords: false,
-          useBatchFetch: true
-        }
-      }
-    }
-  }
-  
-  const analyticalPatterns = [
-    /what (is|are)/i,
-    /tell me about/i,
-    /explain/i,
-    /describe/i,
-    /how (does|do|can|to)/i,
-    /why/i,
-    /best.*for/i,
-    /recommend/i,
-    /suitable for/i,
-    /which.*should/i
-  ]
-  
-  const isAnalytical = analyticalPatterns.some(pattern => pattern.test(processedQuery))
-  
-  const stopWords = new Set([
-    'what', 'is', 'are', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-    'of', 'with', 'by', 'from', 'as', 'tell', 'me', 'about', 'how', 'does', 'do', 'can',
-    'should', 'would', 'could', 'best', 'good', 'better', 'vs', 'versus', 'compare', 'difference',
-    'different', 'between', 'show'
-  ])
-  
-  const words = processedQuery
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.has(w))
-  
-  const keywords = [...new Set(words)]
-  
-  return {
-    questionType: isAnalytical ? 'analytical' : 'lookup',
-    searchKeywords: keywords,
-    requireAllKeywords: false,
-    useBatchFetch: keywords.length <= 3
-  }
-}
-
-// Fast multi-keyword search
-async function fastMultiKeywordSearch(
-  keywords: string[],
+// 🔍 Smart database search using AI-extracted terms
+async function smartDatabaseSearch(
+  searchTerms: string[],
   filters: { family?: string; productType?: string; productModel?: string },
   supabaseClient: any
 ): Promise<ProductRecord[]> {
-  console.log(`⚡ Using FAST database search for: ${keywords.join(', ')}`)
+  console.log(`🔍 Smart search for terms: ${searchTerms.join(' | ')}`)
   
-  const startTime = Date.now()
   const allResults: ProductRecord[] = []
   const seenIds = new Set<string>()
   
   try {
-    for (const keyword of keywords) {
-      let query = supabaseClient
-        .from('coatings')
-        .select('*')
+    for (const term of searchTerms) {
+      // Split multi-word terms for better matching
+      const keywords = term.split(/\s+/).filter(k => k.length > 2)
       
-      if (filters.family) query = query.eq('family', filters.family)
-      if (filters.productType) query = query.eq('Product_Type', filters.productType)
-      if (filters.productModel) query = query.eq('Product_Model', filters.productModel)
-      
-      query = query.or(
-        `sku.ilike.%${keyword}%,` +
-        `family.ilike.%${keyword}%,` +
-        `Product_Name.ilike.%${keyword}%,` +
-        `Product_Model.ilike.%${keyword}%`
-      ).limit(50)
-      
-      const { data, error } = await query
-      
-      if (error) {
-        console.error(`❌ Error searching for "${keyword}":`, error)
-        continue
-      }
-      
-      if (data && data.length > 0) {
-        console.log(`  ✓ Found ${data.length} results for "${keyword}"`)
-        data.forEach((item: any) => {
-          const id = item.id || item.sku || JSON.stringify(item)
-          if (!seenIds.has(id)) {
-            seenIds.add(id)
-            allResults.push(item)
-          }
-        })
-      } else {
-        console.log(`  ⚠️ No results for "${keyword}"`)
+      for (const keyword of keywords) {
+        let query = supabaseClient
+          .from('coatings')
+          .select('*')
+        
+        // Apply user filters
+        if (filters.family) query = query.eq('family', filters.family)
+        if (filters.productType) query = query.ilike('Product_Type', `%${filters.productType}%`)
+        if (filters.productModel) query = query.eq('Product_Model', filters.productModel)
+        
+        // Search across multiple columns
+        query = query.or(
+          `sku.ilike.%${keyword}%,` +
+          `family.ilike.%${keyword}%,` +
+          `Product_Name.ilike.%${keyword}%,` +
+          `Product_Type.ilike.%${keyword}%,` +
+          `Product_Model.ilike.%${keyword}%,` +
+          `Product_Description.ilike.%${keyword}%`
+        ).limit(100)
+        
+        const { data, error } = await query
+        
+        if (error) {
+          console.error(`❌ Search error for "${keyword}":`, error)
+          continue
+        }
+        
+        if (data && data.length > 0) {
+          console.log(`  ✓ Found ${data.length} results for "${keyword}"`)
+          data.forEach((item: any) => {
+            const id = item.id || item.sku || JSON.stringify(item)
+            if (!seenIds.has(id)) {
+              seenIds.add(id)
+              allResults.push(item)
+            }
+          })
+        }
       }
     }
     
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2)
-    
-    if (allResults.length > 0) {
-      console.log(`✅ Fast search found ${allResults.length} total products in ${duration}s`)
-    } else {
-      console.log(`❌ Fast search found no results in ${duration}s`)
-    }
-    
+    console.log(`✅ Total unique results: ${allResults.length}`)
     return allResults
-  } catch (err) {
-    console.error('❌ Error in coatings search:', err)
+    
+  } catch (error: any) {
+    console.error('❌ Database search error:', error)
     return []
   }
 }
 
-// Fuzzy search fallback
-async function tryFuzzySearch(keyword: string): Promise<ProductRecord[]> {
-  console.log(`🔍 Trying fuzzy search for: ${keyword}`)
-  
-  try {
-    const { data, error } = await supabase
-      .from('coatings')
-      .select('*')
-      .or(`sku.ilike.%${keyword}%,family.ilike.%${keyword}%,Product_Name.ilike.%${keyword}%,Product_Type.ilike.%${keyword}%,Product_Model.ilike.%${keyword}%`)
-      .limit(20)
-    
-    if (error) throw error
-    
-    if (data && data.length > 0) {
-      console.log(`✅ Fuzzy search found ${data.length} results`)
-      return data
-    }
-  } catch (error: any) {
-    console.error(`❌ Fuzzy search error:`, error)
-  }
-  
-  return []
-}
-
-// Rank search results by relevance
+// Rank search results by relevance to search terms
 function rankSearchResults(
   products: ProductRecord[],
-  keywords: string[]
+  searchTerms: string[]
 ): ProductRecord[] {
   const scored = products.map(product => {
     let score = 0
-    const searchText = Object.values(product)
-      .filter(v => typeof v === 'string')
-      .join(' ')
-      .toLowerCase()
+    const searchableText = [
+      product.sku,
+      product.family,
+      product.Product_Name,
+      product.Product_Type,
+      product.Product_Model,
+      product.Product_Description
+    ].filter(Boolean).join(' ').toLowerCase()
     
-    keywords.forEach(keyword => {
-      const lowerKeyword = keyword.toLowerCase()
+    searchTerms.forEach(term => {
+      const lowerTerm = term.toLowerCase()
+      const keywords = lowerTerm.split(/\s+/)
       
-      if (product.sku?.toLowerCase() === lowerKeyword) {
-        score += 100
-      } else if (product.sku?.toLowerCase().includes(lowerKeyword)) {
-        score += 50
-      }
-      
-      if (product.family?.toLowerCase() === lowerKeyword) {
-        score += 80
-      } else if (product.family?.toLowerCase().includes(lowerKeyword)) {
-        score += 40
-      }
-      
-      if (product.Product_Name?.toLowerCase().includes(lowerKeyword)) {
-        score += 30
-      }
-      
-      if (product.Product_Type?.toLowerCase().includes(lowerKeyword)) {
-        score += 20
-      }
-      
-      if (product.Product_Model?.toLowerCase().includes(lowerKeyword)) {
-        score += 25
-      }
-      
-      if (product.Product_Description?.toLowerCase().includes(lowerKeyword)) {
-        score += 15
-      }
-      
-      if (searchText.includes(lowerKeyword)) {
-        score += 10
-      }
+      keywords.forEach(keyword => {
+        // Exact SKU match - highest priority
+        if (product.sku?.toLowerCase() === keyword) {
+          score += 1000
+        } else if (product.sku?.toLowerCase().includes(keyword)) {
+          score += 500
+        }
+        
+        // Family match - high priority
+        if (product.family?.toLowerCase() === keyword) {
+          score += 800
+        } else if (product.family?.toLowerCase().includes(keyword)) {
+          score += 400
+        }
+        
+        // Product name match
+        if (product.Product_Name?.toLowerCase().includes(keyword)) {
+          score += 300
+        }
+        
+        // Type and model match
+        if (product.Product_Type?.toLowerCase().includes(keyword)) {
+          score += 200
+        }
+        
+        if (product.Product_Model?.toLowerCase().includes(keyword)) {
+          score += 250
+        }
+        
+        // General text match
+        if (searchableText.includes(keyword)) {
+          score += 100
+        }
+      })
     })
     
     return { product, score }
@@ -612,86 +538,46 @@ function rankSearchResults(
   return scored.map(s => s.product)
 }
 
-// 🎯 NEW: Smart AI system prompt - Let AI discover the data structure
+// 🎯 Smart AI system prompt
 function getSmartAISystemPrompt(): string {
   return `You are an expert aerospace coatings consultant with deep technical knowledge.
 
 **YOUR ROLE:**
-You will receive product data from a coatings database. Your job is to:
-1. **Analyze the data structure** - Understand what fields are available
-2. **Extract relevant information** - Find the answer to the user's question
-3. **Provide clear, accurate answers** - Based ONLY on the data provided
+Analyze product data and provide clear, accurate answers based ONLY on the data provided.
 
-**HOW TO ANSWER:**
-- **For specific questions** (e.g., "what is the mix ratio of CA 8100"):
-  → Search through ALL fields in the product data
-  → Find fields that contain relevant information (e.g., "Mix_Ratio", "Mixing", "Ratio")
-  → Extract and present the exact values
-  → If multiple related fields exist, show all of them
-  
-- **For comparison questions**:
-  → Compare the same fields across products
-  → Highlight differences and similarities
-  → Use tables for clarity
-  
-- **For general questions**:
-  → Provide an overview of key product characteristics
-  → Focus on the most important/relevant fields
-  → Explain technical specifications in context
+**FORMATTING RULES:**
+1. Use natural paragraph text for descriptions and explanations
+2. Use bullet points (•) ONLY for listing items or highlighting key contrasts
+3. Use tables for side-by-side comparisons
+4. Use **bold** for important specifications and product names
+5. DO NOT include "Source" or "Reference" sections
+6. Keep answers concise but complete
 
-**IMPORTANT RULES:**
-1. **Don't assume field names** - The database structure may vary
-2. **Search intelligently** - Look for keywords in field names (e.g., "mix", "ratio", "cure", "time")
-3. **Be thorough** - Check all fields, not just obvious ones
-4. **Cite your sources** - Always mention which field the information came from
-5. **If data is missing** - Clearly state "This information is not available in the product data"
-6. **Be precise** - Use exact values from the data, don't estimate
+**EXAMPLE COMPARISON:**
 
-**FORMATTING:**
-- Use markdown for readability
-- Use **bold** for important specifications
-- Use tables for comparisons
-- Use bullet points for lists
-- Keep answers concise but complete
+| Specification | Product A | Product B |
+|--------------|-----------|-----------|
+| **Type** | Topcoat | Primer |
+| **VOC** | 420 g/L | 340 g/L |
 
-**EXAMPLE RESPONSES:**
+**Key Differences:**
+• Product A is for final finish applications
+• Product B is for substrate preparation
 
-User: "What is the mix ratio of CA 8100?"
-Good Answer: "Based on the product data for CA 8100:
-- **Mix Ratio by Volume**: 4:1:1 (Base:Activator:Reducer)
-- **Mix Ratio by Weight**: 100:25:20
-- **Pot Life**: 4-6 hours at 77°F
-
-(Source: Mix_Ratio_by_Volume, Mix_Ratio_by_Weight, Pot_Life fields)"
-
-User: "Compare 44GN060 and 44GN057"
-Good Answer: "**Key Differences:**
-| Specification | 44GN060 | 44GN057 |
-|--------------|---------|---------|
-| Product Type | Topcoat | Primer |
-| Color | Gray | Green |
-| VOC Content | 420 g/L | 340 g/L |
-
-**Similarities:**
-• Both are from the 44GN family
-• Both meet MIL-PRF-85285 specification
-• Both have 4-6 hour pot life"
-
-Remember: Your goal is to be helpful, accurate, and thorough. Always base your answers on the actual data provided.`
+Remember: Write naturally like a technical consultant. Use bullet points sparingly.`
 }
 
-// 🎯 NEW: Prepare complete product data for AI (send EVERYTHING)
-function prepareCompleteProductDataForAI(products: ProductRecord[]): string {
-  const productDataStrings = products.map((product, index) => {
+// Prepare product data for AI
+function prepareProductDataForAI(products: ProductRecord[]): string {
+  const productStrings = products.map((product, index) => {
     const lines: string[] = []
     lines.push(`\n${'='.repeat(80)}`)
     lines.push(`PRODUCT ${index + 1}`)
     lines.push('='.repeat(80))
     
-    // Send ALL fields to AI
     Object.entries(product).forEach(([key, value]) => {
-      if (value !== null && value !== undefined && value !== '') {
-        const valueStr = String(value).substring(0, 1000) // Limit per field
+      if (!key.startsWith('_') && value !== null && value !== undefined && value !== '') {
+        const valueStr = String(value).substring(0, 1000)
         lines.push(`${key}: ${valueStr}`)
       }
     })
@@ -699,32 +585,20 @@ function prepareCompleteProductDataForAI(products: ProductRecord[]): string {
     return lines.join('\n')
   })
   
-  return productDataStrings.join('\n\n')
+  return productStrings.join('\n\n')
 }
 
-// 🎯 NEW: Universal AI analysis - Let AI figure out the answer
-async function generateSmartAIAnalysis(
+// Generate AI analysis
+async function generateAIAnalysis(
   products: ProductRecord[],
   userQuery: string,
-  questionType: 'lookup' | 'comparison' | 'analytical'
+  questionType: string
 ): Promise<string> {
   try {
-    // Send up to 5 products with ALL their data
     const productsToAnalyze = products.slice(0, 5)
-    const completeProductData = prepareCompleteProductDataForAI(productsToAnalyze)
+    const productData = prepareProductDataForAI(productsToAnalyze)
     
-    console.log(`🤖 Sending ${productsToAnalyze.length} products to AI (${completeProductData.length} chars)`)
-    console.log(`📊 Question type: ${questionType}`)
-    
-    // Create context hint based on question type
-    let contextHint = ''
-    if (questionType === 'comparison') {
-      contextHint = '\n\n**USER INTENT:** The user wants to compare these products. Focus on finding differences and similarities.'
-    } else if (questionType === 'analytical') {
-      contextHint = '\n\n**USER INTENT:** The user is asking an analytical question. Provide detailed insights and recommendations.'
-    } else {
-      contextHint = '\n\n**USER INTENT:** The user is looking up product information. Provide a clear, informative answer.'
-    }
+    console.log(`🤖 Generating AI analysis for ${productsToAnalyze.length} products`)
     
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -735,33 +609,32 @@ async function generateSmartAIAnalysis(
         },
         {
           role: 'user',
-          content: `${contextHint}
-
-**USER QUESTION:**
-${userQuery}
+          content: `**USER QUESTION:** ${userQuery}
 
 **PRODUCT DATA:**
-${completeProductData}
+${productData}
 
-Please analyze the product data above and answer the user's question. Remember to:
-1. Search through ALL fields to find relevant information
-2. Cite which fields you're getting information from
-3. Be specific and accurate
-4. If the information doesn't exist in the data, say so clearly`
+Analyze and answer the user's question based on the product data above.`
         }
       ],
-      temperature: 0.2, // Lower temperature for more accurate, factual responses
+      temperature: 0.2,
       max_tokens: 2000
     })
     
-    const aiResponse = completion.choices[0].message.content || ''
-    console.log(`✅ AI analysis complete (${aiResponse.length} chars)`)
+    let response = completion.choices[0].message.content || ''
     
-    return aiResponse.replace(/<[^>]*>/g, '') // Strip any HTML
+    // Clean up response
+    response = response.replace(/\n\n.*?(?:Source|Reference)s?:.*$/is, '')
+    response = response.replace(/\(Source:.*?\)/gi, '')
+    response = response.replace(/<[^>]*>/g, '')
+    
+    console.log(`✅ AI analysis complete`)
+    
+    return response
     
   } catch (error: any) {
     console.error('❌ AI analysis failed:', error.message)
-    return `I found ${products.length} product(s) matching your search, but I'm unable to generate a detailed analysis at this time. Please try again or contact support.`
+    return `I found ${products.length} product(s) but couldn't generate analysis. Please try again.`
   }
 }
 
@@ -773,268 +646,128 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { query, family = '', productType = '', productModel = '' } = body
     
-    // Handle special internal filter options request
+    // Handle filter options request
     if (query === '__GET_FILTER_OPTIONS__') {
       console.log(`\n${'='.repeat(80)}`)
-      console.log(`> 🎛️ Internal request: GET_FILTER_OPTIONS`)
+      console.log(`> 🎛️ GET_FILTER_OPTIONS`)
       const filterOptions = await getFilterOptions(supabase)
       const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-      console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
+      console.log(` ✅ Completed in ${duration}s`)
       console.log(`${'='.repeat(80)}\n`)
       return NextResponse.json(filterOptions)
     }
     
     console.log(`\n${'='.repeat(80)}`)
-    console.log(`> 🔍 User query: ${query}`)
-    console.log(`> 🎯 Applied filters: { family: '${family}', productType: '${productType}', productModel: '${productModel}' }`)
+    console.log(`> 🔍 Query: ${query}`)
+    console.log(`> 🎯 Filters: family='${family}', type='${productType}', model='${productModel}'`)
     
     if (!query || typeof query !== 'string') {
       return NextResponse.json(
-        { success: false, error: 'Invalid query parameter' },
+        { success: false, error: 'Invalid query' },
         { status: 400 }
       )
     }
     
-    // Get available columns
-    const { data: sampleData } = await supabase
+    // Get available options for AI context
+    const { data: familyData } = await supabase
       .from('coatings')
-      .select('*')
-      .limit(1)
+      .select('family')
+      .not('family', 'is', null)
+      .limit(100)
     
-    const availableColumns = sampleData && sampleData.length > 0 
-      ? Object.keys(sampleData[0]).length 
-      : 0
+    const { data: typeData } = await supabase
+      .from('coatings')
+      .select('Product_Type')
+      .not('Product_Type', 'is', null)
+      .limit(100)
     
-    console.log(`> 📊 Available columns: ${availableColumns}`)
+    const availableFamilies = [...new Set(familyData?.map((r: any) => r.family).filter(Boolean))] || []
+    const availableTypes = [...new Set(typeData?.map((r: any) => r.Product_Type).filter(Boolean))] || []
     
-    // Parse search parameters
-    const searchParams = parseSearchQuery(query)
-    console.log(`> 📋 Parsed search params:`, JSON.stringify(searchParams, null, 2))
+    // 🤖 Use AI to parse the query
+    const userFilters = { family, productType, productModel }
+    const intent = await parseQueryWithAI(query, availableFamilies, availableTypes, userFilters)
     
-    // Check for meta-questions
-    const metaCheck = detectMetaQuestion(query)
-    const filterCheck = detectFilteredMetaQuestion(query)
+    console.log(`> 📋 Intent: ${intent.questionType}`)
+    console.log(`> 🔑 Search terms: ${intent.searchTerms.join(', ')}`)
     
-    if (metaCheck.isMeta && metaCheck.type) {
-      if (filterCheck.hasFilter && filterCheck.filterType && filterCheck.filterValue) {
-        console.log(`> 🎯 Detected filtered meta-question: ${metaCheck.type} with ${filterCheck.filterType} = ${filterCheck.filterValue}`)
-        
-        const metaResult = await handleMetaQuestion(
-          metaCheck.type,
-          query,
-          supabase,
-          {
-            filterType: filterCheck.filterType,
-            filterValue: filterCheck.filterValue
-          }
-        )
-        
-        if (metaResult) {
-          const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-          console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
-          console.log(`${'='.repeat(80)}\n`)
-          return NextResponse.json(metaResult)
-        }
-      } else {
-        console.log(`> 🎯 Detected meta-question type: ${metaCheck.type}`)
-        const metaResult = await handleMetaQuestion(metaCheck.type, query, supabase)
-        if (metaResult) {
-          const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-          console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
-          console.log(`${'='.repeat(80)}\n`)
-          return NextResponse.json(metaResult)
-        }
-      }
-    }
-    
-    // Continue with normal search
-    const searchKeywords = searchParams.searchKeywords
-    console.log(`> 🔑 Search keywords:`, searchKeywords.join(', '))
-    console.log(`> ❓ Question type: ${searchParams.questionType}`)
-    
-    if (searchKeywords.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: 'No valid search keywords found',
-        message: 'Please provide specific product names, SKUs, or families to search for.'
-      })
-    }
-    
-    // Build filters
-    const filters: { family?: string; productType?: string; productModel?: string } = {}
-    if (family) filters.family = family
-    if (productType) filters.productType = productType
-    if (productModel) filters.productModel = productModel
-    
-    // Execute fast search
-    console.log(`> ⚡ Using optimized fast search strategy!`)
-    const searchResults = await fastMultiKeywordSearch(searchKeywords, filters, supabase)
-    console.log(`> ✅ Search returned ${searchResults.length} matching products`)
-    
-    // Rank results
-    const rankedResults = rankSearchResults(searchResults, searchKeywords)
-    
-    // Log top results
-    if (rankedResults.length > 0) {
-      console.log(`> 🎯 Top 5 results:`)
-      rankedResults.slice(0, 5).forEach((p, idx) => {
-        console.log(`>    ${idx + 1}. SKU: ${p.sku || 'N/A'} (Family: ${p.family || 'N/A'})`)
-      })
-    }
-    
-    // Handle no results
-    if (rankedResults.length === 0) {
-      console.log(`> ⚠️ No exact matches found, trying fallback strategies...`)
-      
-      const fuzzyResults: ProductRecord[] = []
-      for (const keyword of searchKeywords) {
-        const results = await tryFuzzySearch(keyword)
-        fuzzyResults.push(...results)
+    // Handle meta-questions
+    if (intent.questionType === 'meta' && intent.metaType) {
+      const filters = {
+        family: family || intent.filters?.family,
+        productType: productType || intent.filters?.productType,
+        productModel: productModel || intent.filters?.productModel
       }
       
-      if (fuzzyResults.length > 0) {
-        console.log(`> ✅ Fuzzy search found ${fuzzyResults.length} results`)
-        const cleanedResults = fuzzyResults.map(p => cleanProductData(p))
-        
+      const metaResult = await handleMetaQuestion(intent.metaType, filters, supabase)
+      
+      if (metaResult) {
         const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-        console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
+        console.log(` ✅ Completed in ${duration}s`)
         console.log(`${'='.repeat(80)}\n`)
-        
-        return NextResponse.json({
-          success: true,
-          questionType: searchParams.questionType,
-          products: cleanedResults,
-          count: cleanedResults.length,
-          message: `Found ${cleanedResults.length} similar product(s) using fuzzy search`
-        })
+        return NextResponse.json(metaResult)
       }
-      
-      console.log(`> ❌ No results found even with fuzzy search`)
-      
+    }
+    
+    // Build combined filters
+    const filters = {
+      family: family || intent.filters?.family,
+      productType: productType || intent.filters?.productType,
+      productModel: productModel || intent.filters?.productModel
+    }
+    
+    // Execute smart search
+    const searchResults = await smartDatabaseSearch(intent.searchTerms, filters, supabase)
+    console.log(`> ✅ Found ${searchResults.length} products`)
+    
+    if (searchResults.length === 0) {
       const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-      console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
+      console.log(` ⚠️ No results in ${duration}s`)
       console.log(`${'='.repeat(80)}\n`)
       
       return NextResponse.json({
         success: false,
         error: 'No products found',
-        message: `No products found matching: ${searchKeywords.join(', ')}. Try different keywords or check the spelling.`
+        message: `No products found matching your search. Try different keywords.`
       })
     }
     
-    // Clean products
+    // Rank results
+    const rankedResults = rankSearchResults(searchResults, intent.searchTerms)
     const cleanedProducts = rankedResults.map(p => cleanProductData(p))
     
-    // 🎯 Handle comparison queries with SMART AI
-    if (searchParams.questionType === "comparison") {
-      console.log(`> 📊 Comparison mode - using smart AI analysis`)
-      
-      const productsByKeyword = new Map<string, ProductRecord[]>()
-      
-      searchKeywords.forEach(keyword => {
-        const matchingProducts = cleanedProducts.filter(product => {
-          const searchText = Object.values(product)
-            .filter(v => typeof v === 'string')
-            .join(' ')
-            .toLowerCase()
-          return searchText.includes(keyword.toLowerCase())
-        })
-        
-        if (matchingProducts.length > 0) {
-          productsByKeyword.set(keyword, matchingProducts)
-        }
-      })
-      
-      const comparisonProducts: ProductRecord[] = []
-      
-      productsByKeyword.forEach((products, keyword) => {
-        comparisonProducts.push(products[0])
-      })
-      
-      const missingKeywords = searchKeywords.filter(k => !Array.from(productsByKeyword.keys()).includes(k))
-      
-      if (missingKeywords.length > 0) {
-        for (const keyword of missingKeywords) {
-          const fuzzyResults = await tryFuzzySearch(keyword)
-          if (fuzzyResults.length > 0) {
-            comparisonProducts.push(cleanProductData(fuzzyResults[0]))
-          }
-        }
-      }
-      
-      const uniqueProducts = Array.from(
-        new Map(comparisonProducts.map(p => [p.sku?.toLowerCase(), p])).values()
-      )
-      
-      console.log(`> 🤖 Generating SMART AI comparison analysis`)
-      const aiSummary = await generateSmartAIAnalysis(uniqueProducts, query, 'comparison')
-      
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-      console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
-      console.log(`${'='.repeat(80)}\n`)
-      
-      return NextResponse.json({
-        success: true,
-        questionType: "comparison",
-        products: uniqueProducts,
-        summary: aiSummary,
-        count: uniqueProducts.length,
-        message: `Comparing ${uniqueProducts.length} product(s)`
-      })
-    }
+    console.log(`> 🎯 Top results:`)
+    cleanedProducts.slice(0, 3).forEach((p, idx) => {
+      console.log(`>    ${idx + 1}. ${p.sku || 'N/A'} - ${p.Product_Name || 'N/A'}`)
+    })
     
-    // 🎯 Handle analytical queries with SMART AI
-    if (searchParams.questionType === "analytical") {
-      console.log(`> 🤖 Analytical mode - using smart AI analysis`)
-      
-      const topProducts = cleanedProducts.slice(0, 10)
-      const aiSummary = await generateSmartAIAnalysis(topProducts, query, 'analytical')
-      
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-      console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
-      console.log(`${'='.repeat(80)}\n`)
-      
-      return NextResponse.json({
-        success: true,
-        questionType: "analytical",
-        products: topProducts,
-        summary: aiSummary,
-        count: topProducts.length,
-        totalFound: rankedResults.length,
-        message: `Found ${rankedResults.length} product(s) with AI analysis`
-      })
-    }
-    
-    // 🎯 Handle lookup queries with SMART AI
-    console.log(`> 📋 Lookup mode - using smart AI analysis`)
-    const topResults = cleanedProducts.slice(0, 50)
-    const lookupSummary = await generateSmartAIAnalysis(topResults.slice(0, 5), query, 'lookup')
+    // Generate AI analysis
+    console.log(`> 🤖 Generating AI analysis...`)
+    const aiSummary = await generateAIAnalysis(cleanedProducts, query, intent.questionType)
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
+    console.log(` ✅ Completed in ${duration}s`)
     console.log(`${'='.repeat(80)}\n`)
     
     return NextResponse.json({
       success: true,
-      questionType: "lookup",
-      products: topResults,
-      summary: lookupSummary,
-      count: topResults.length,
-      totalFound: rankedResults.length,
-      message: `Found ${rankedResults.length} product(s)`
+      questionType: intent.questionType,
+      products: cleanedProducts.slice(0, 50),
+      summary: aiSummary,
+      count: cleanedProducts.length,
+      message: `Found ${cleanedProducts.length} product(s)`
     })
     
   } catch (error: any) {
-    console.error('> ❌ Search error:', error)
+    console.error('> ❌ Error:', error)
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(` POST /api/coatings-smart-search 500 in ${duration}s`)
+    console.log(` ❌ Failed in ${duration}s`)
     console.log(`${'='.repeat(80)}\n`)
     
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Internal server error',
-        details: error.toString()
+        error: error.message || 'Internal server error'
       },
       { status: 500 }
     )

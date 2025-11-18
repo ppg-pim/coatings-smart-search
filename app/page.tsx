@@ -45,7 +45,6 @@ export default function CoatingsPage() {
     const color = colors[colorClass] || colors.green
     
     // 1. Handle markdown tables FIRST (before other replacements)
-    // Fixed regex pattern to avoid CSS conflicts
     const tablePattern = /\n\|(.+)\|\n\|[\-:\s|]+\|\n((?:\|.+\|\n?)+)/g
     html = html.replace(tablePattern, (match, header, rows) => {
       const headerCells = header.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
@@ -70,25 +69,36 @@ export default function CoatingsPage() {
     // 3. Handle bold text
     html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
     
-    // 4. Handle bullet lists (convert - to •)
-    html = html.replace(/\n- /g, '\n• ')
+    // 4. 🎯 NEW: Convert plain "Key: Value" lines to bullet points
+    // This handles lines like "Mixing Ratio: 2 parts base..."
+    html = html.replace(/\n([A-Z][^:\n]{2,50}):\s*([^\n]+)/g, '\n• **$1:** $2')
     
-    // 5. Handle paragraphs
+    // 5. Handle bullet lists (convert both - and • to consistent format)
+    html = html.replace(/\n[-•]\s+/g, '\n• ')
+    
+    // 6. Handle paragraphs
     const lines = html.split('\n\n')
     const processedLines = lines.map(line => {
       // Skip if already HTML
       if (line.trim().startsWith('<')) return line
       // Skip empty lines
       if (line.trim() === '') return ''
+      
+      // Check if this is a bullet list block
+      if (line.includes('\n• ')) {
+        const items = line.split('\n• ').filter(item => item.trim())
+        const listItems = items.map(item => {
+          // Process bold within list items
+          const processedItem = item.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
+          return `<li class="ml-6">${processedItem}</li>`
+        }).join('')
+        return `<ul class="list-disc ml-6 mt-3 space-y-2">${listItems}</ul>`
+      }
+      
       // Wrap in paragraph
       return `<p class="mt-4">${line}</p>`
     })
     html = processedLines.join('')
-    
-    // 6. Handle lists within paragraphs
-    html = html.replace(/<p class="mt-4">• /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
-    html = html.replace(/\n• /g, '</li><li>')
-    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/g, '</li><li>$1</li></ul>')
     
     // 7. Clean up empty paragraphs
     html = html.replace(/<p class="mt-4"><\/p>/g, '')
