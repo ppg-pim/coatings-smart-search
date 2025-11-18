@@ -681,8 +681,8 @@ export async function POST(req: NextRequest) {
       .not('Product_Type', 'is', null)
       .limit(100)
     
-    const availableFamilies = [...new Set(familyData?.map((r: any) => r.family).filter(Boolean))] || []
-    const availableTypes = [...new Set(typeData?.map((r: any) => r.Product_Type).filter(Boolean))] || []
+    const availableFamilies = familyData ? [...new Set(familyData.map((r: any) => r.family).filter(Boolean))] : []
+    const availableTypes = typeData ? [...new Set(typeData.map((r: any) => r.Product_Type).filter(Boolean))] : []
     
     // 🤖 Use AI to parse the query
     const userFilters = { family, productType, productModel }
