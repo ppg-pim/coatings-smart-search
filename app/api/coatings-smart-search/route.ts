@@ -409,7 +409,6 @@ ${types.length > 15 ? `\n_...and ${types.length - 15} more_` : ''}`
   return null
 }
 
-// 🔍 Smart database search using AI-extracted terms
 async function smartDatabaseSearch(
   searchTerms: string[],
   filters: { family?: string; productType?: string; productModel?: string },
@@ -421,41 +420,69 @@ async function smartDatabaseSearch(
   const seenIds = new Set<string>()
   
   try {
+    // Try exact SKU match first (fastest)
     for (const term of searchTerms) {
-      // Split multi-word terms for better matching
-      const keywords = term.split(/\s+/).filter(k => k.length > 2)
+      const cleanTerm = term.trim().replace(/\s+/g, '')
       
-      for (const keyword of keywords) {
+      let exactQuery = supabaseClient
+        .from('coatings')
+        .select('*')
+        .eq('sku', cleanTerm)
+      
+      if (filters.family) exactQuery = exactQuery.eq('family', filters.family)
+      if (filters.productType) exactQuery = exactQuery.ilike('Product_Type', `%${filters.productType}%`)
+      if (filters.productModel) exactQuery = exactQuery.eq('Product_Model', filters.productModel)
+      
+      const { data: exactData, error: exactError } = await exactQuery
+      
+      if (!exactError && exactData && exactData.length > 0) {
+        console.log(`  ✓ Found ${exactData.length} exact SKU matches for "${cleanTerm}"`)
+        exactData.forEach((item: any) => {
+          const id = item.id || item.sku
+          if (!seenIds.has(id)) {
+            seenIds.add(id)
+            allResults.push(item)
+          }
+        })
+        continue // Skip fuzzy search if exact match found
+      }
+    }
+    
+    // If no exact matches, do fuzzy search with optimized query
+    if (allResults.length === 0) {
+      for (const term of searchTerms) {
+        const cleanTerm = term.trim()
+        if (cleanTerm.length < 3) continue
+        
+        // Build a single optimized query instead of multiple
         let query = supabaseClient
           .from('coatings')
           .select('*')
+          .limit(50) // Limit results per term
         
         // Apply user filters
         if (filters.family) query = query.eq('family', filters.family)
         if (filters.productType) query = query.ilike('Product_Type', `%${filters.productType}%`)
         if (filters.productModel) query = query.eq('Product_Model', filters.productModel)
         
-        // Search across multiple columns
+        // Use simpler OR query with fewer columns
         query = query.or(
-          `sku.ilike.%${keyword}%,` +
-          `family.ilike.%${keyword}%,` +
-          `Product_Name.ilike.%${keyword}%,` +
-          `Product_Type.ilike.%${keyword}%,` +
-          `Product_Model.ilike.%${keyword}%,` +
-          `Product_Description.ilike.%${keyword}%`
-        ).limit(100)
+          `sku.ilike.%${cleanTerm}%,` +
+          `family.ilike.%${cleanTerm}%,` +
+          `Product_Name.ilike.%${cleanTerm}%`
+        )
         
         const { data, error } = await query
         
         if (error) {
-          console.error(`❌ Search error for "${keyword}":`, error)
+          console.error(`❌ Search error for "${cleanTerm}":`, error)
           continue
         }
         
         if (data && data.length > 0) {
-          console.log(`  ✓ Found ${data.length} results for "${keyword}"`)
+          console.log(`  ✓ Found ${data.length} fuzzy results for "${cleanTerm}"`)
           data.forEach((item: any) => {
-            const id = item.id || item.sku || JSON.stringify(item)
+            const id = item.id || item.sku
             if (!seenIds.has(id)) {
               seenIds.add(id)
               allResults.push(item)
