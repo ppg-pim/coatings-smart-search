@@ -41,6 +41,16 @@ function cleanProductData(product: ProductRecord): ProductRecord {
           .replace(/&gt;/gi, '>')
           .replace(/&quot;/gi, '"')
           .replace(/&#39;/gi, "'")
+          .replace(/&rsquo;/gi, "'")        
+          .replace(/&lsquo;/gi, "'")        
+          .replace(/&rdquo;/gi, '"')        
+          .replace(/&ldquo;/gi, '"')        
+          .replace(/&deg;/gi, '°')          
+          .replace(/&plusmn;/gi, '±')       
+          .replace(/&times;/gi, '×')        
+          .replace(/&divide;/gi, '÷')       
+          .replace(/&ndash;/gi, '–')        
+          .replace(/&mdash;/gi, '—')        
           .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))
           .replace(/&#x([0-9a-f]+);/gi, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
           .replace(/\n{3,}/g, '\n\n')
@@ -643,7 +653,7 @@ You will receive product data from a coatings database. Your job is to:
 1. **Don't assume field names** - The database structure may vary
 2. **Search intelligently** - Look for keywords in field names (e.g., "mix", "ratio", "cure", "time")
 3. **Be thorough** - Check all fields, not just obvious ones
-4. **Cite your sources** - Always mention which field the information came from
+4. **Cite your sources** - Always mention which field the information came from, format them naturally without underscores (e.g., "Mix Ratio by Volume" instead of "Mix_Ratio_by_Volume")
 5. **If data is missing** - Clearly state "This information is not available in the product data"
 6. **Be precise** - Use exact values from the data, don't estimate
 
@@ -651,8 +661,10 @@ You will receive product data from a coatings database. Your job is to:
 - Use markdown for readability
 - Use **bold** for important specifications
 - Use tables for comparisons
-- Use bullet points for lists
+- Use dashes (-) for all lists, NOT bullet points (•)
 - Keep answers concise but complete
+- When citing field sources, use regular text without underscores (e.g., "Source: Mix Ratio by Volume" not "Source: Mix_Ratio_by_Volume")
+
 
 **EXAMPLE RESPONSES:**
 
@@ -662,7 +674,7 @@ Good Answer: "Based on the product data for CA 8100:
 - **Mix Ratio by Weight**: 100:25:20
 - **Pot Life**: 4-6 hours at 77°F
 
-(Source: Mix_Ratio_by_Volume, Mix_Ratio_by_Weight, Pot_Life fields)"
+(Source: Mix Ratio by Volume, Mix Ratio by Weight, Pot Life fields)"
 
 User: "Compare 44GN060 and 44GN057"
 Good Answer: "**Key Differences:**
@@ -745,9 +757,10 @@ ${completeProductData}
 
 Please analyze the product data above and answer the user's question. Remember to:
 1. Search through ALL fields to find relevant information
-2. Cite which fields you're getting information from
-3. Be specific and accurate
-4. If the information doesn't exist in the data, say so clearly`
+2. When citing field names, convert underscores to spaces (e.g., "Mix Ratio by Volume" not "Mix_Ratio_by_Volume")
+3. Use dashes (-) for all lists, NOT bullet points (•)
+4. Be specific and accurate
+5. If the information doesn't exist in the data, say so clearly`
         }
       ],
       temperature: 0.2, // Lower temperature for more accurate, factual responses
