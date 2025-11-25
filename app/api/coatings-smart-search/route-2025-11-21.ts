@@ -412,38 +412,33 @@ function parseSearchQuery(query: string): SearchParams {
   
   console.log(`📝 Processed query: "${processedQuery}"`)
   
-  // 🎯 NEW: Universal N-way comparison detection
-  const comparisonKeywords = [
-    'compare',
-    'comparison',
-    'vs',
-    'versus',
-    'difference between',
-    'different between',
-    'difference of',      // ✅ NEW
-    'differentiation'
+  const comparisonPatterns = [
+    /compare\s+([a-z0-9\s]+?)\s*(?:vs\.?|versus|and|with|to)\s*([a-z0-9\s]+?)(?:\s|$)/i,
+    /\b([a-z0-9]{5,})\s*(?:vs\.?|versus|to)\s*([a-z0-9]{5,})\b/i,
+    /(?:difference|different)\s+between\s+([a-z0-9\s]+?)\s+and\s+([a-z0-9\s]+?)(?:\s|$)/i,
+    /what.*?(?:difference|different).*?between\s+([a-z0-9\s]+?)\s+and\s+([a-z0-9\s]+?)(?:\s|$)/i,
+    /show.*?(?:difference|different).*?between\s+([a-z0-9\s]+?)\s+and\s+([a-z0-9\s]+?)(?:\s|$)/i,
+    /([a-z0-9]+)\s+and\s+([a-z0-9]+)\s+(?:comparison|compare|difference|different)/i,
+    /\b([a-z0-9]{5,})\s+or\s+([a-z0-9]{5,})\b/i
   ]
   
-  const hasComparisonKeyword = comparisonKeywords.some(kw => 
-    processedQuery.toLowerCase().includes(kw)
-  )
-  
-  if (hasComparisonKeyword) {
-    // Extract comparison items dynamically
-    const items = extractComparisonItems(processedQuery)
-    
-    if (items && items.length >= 2) {
-      console.log(`🔍 Detected ${items.length}-way comparison: ${items.join(' vs ')}`)
-      return {
-        questionType: 'comparison',
-        searchKeywords: items,
-        requireAllKeywords: false,
-        useBatchFetch: true
+  for (const pattern of comparisonPatterns) {
+    const match = processedQuery.match(pattern)
+    if (match) {
+      const keywords = [match[1].trim(), match[2].trim()].filter(k => k && k.length > 0)
+      
+      if (keywords.length >= 2) {
+        console.log(`🔍 Detected comparison: ${keywords.join(' vs ')}`)
+        return {
+          questionType: 'comparison',
+          searchKeywords: keywords,
+          requireAllKeywords: false,
+          useBatchFetch: true
+        }
       }
     }
   }
   
-  // Rest of the function remains the same...
   const analyticalPatterns = [
     /what (is|are)/i,
     /tell me about/i,
@@ -482,68 +477,6 @@ function parseSearchQuery(query: string): SearchParams {
   }
 }
 
-// 🎯 NEW: Helper function to extract N comparison items
-function extractComparisonItems(query: string): string[] | null {
-  let cleaned = query.toLowerCase().trim()
-  
-  // Step 1: Remove comparison keywords BUT keep the structure
-  const removeKeywords = [
-    'show me the difference of',
-    'show me the difference between',
-    'what is the difference of',
-    'what is the difference between',
-    'what\'s the difference of',
-    'what\'s the difference between',
-    'tell me the difference of',
-    'tell me the difference between',
-    'compare',
-    'comparison',
-    'show me',
-    'tell me',
-    'what is the',
-    'what\'s the'
-  ]
-  
-  // Sort by length (longest first) to avoid partial replacements
-  removeKeywords.sort((a, b) => b.length - a.length)
-  
-  removeKeywords.forEach(keyword => {
-    cleaned = cleaned.replace(new RegExp(`\\b${keyword}\\b`, 'gi'), '')
-  })
-  
-  // Step 2: Replace all separators with a common delimiter
-  const separators = [
-    /\s+vs\.?\s+/gi,
-    /\s+versus\s+/gi,
-    /\s+to\s+/gi,
-    /\s+and\s+/gi,
-    /\s+with\s+/gi,
-    /\s*,\s*/g
-  ]
-  
-  separators.forEach(sep => {
-    cleaned = cleaned.replace(sep, '|||')
-  })
-  
-  // Step 3: Split and clean items
-  const items = cleaned
-    .split('|||')
-    .map(item => item.trim())
-    .filter(item => {
-      // Filter out empty strings and noise words
-      const noiseWords = ['the', 'a', 'an', 'with', 'between', 'of', 'at', '']
-      return item.length > 1 && !noiseWords.includes(item)
-    })
-  
-  // Step 4: Validate - need at least 2 items for comparison
-  if (items.length >= 2) {
-    console.log(`  📦 Extracted ${items.length} items: ${items.join(', ')}`)
-    return items
-  }
-  
-  return null
-}
-
 // Fast multi-keyword search
 async function fastMultiKeywordSearch(
   keywords: string[],
@@ -558,12 +491,6 @@ async function fastMultiKeywordSearch(
   
   try {
     for (const keyword of keywords) {
-      // 🎯 Smart keyword processing
-      let searchTerm = keyword
-      let familySearchTerm = keyword.replace(/\s+/g, '').toUpperCase() // "ca 9311" → "CA9311"
-      
-      console.log(`  🔍 Searching for: "${keyword}" (family: "${familySearchTerm}")`)
-      
       let query = supabaseClient
         .from('coatings')
         .select('*')
@@ -572,13 +499,11 @@ async function fastMultiKeywordSearch(
       if (filters.productType) query = query.eq('Product_Type', filters.productType)
       if (filters.productModel) query = query.eq('Product_Model', filters.productModel)
       
-      // 🎯 Enhanced search: Check multiple fields with different formats
       query = query.or(
-        `sku.ilike.%${searchTerm}%,` +
-        `family.ilike.%${searchTerm}%,` +
-        `family.ilike.%${familySearchTerm}%,` +  // ✅ NEW: Search without spaces
-        `Product_Name.ilike.%${searchTerm}%,` +
-        `Product_Model.ilike.%${searchTerm}%`
+        `sku.ilike.%${keyword}%,` +
+        `family.ilike.%${keyword}%,` +
+        `Product_Name.ilike.%${keyword}%,` +
+        `Product_Model.ilike.%${keyword}%`
       ).limit(50)
       
       const { data, error } = await query
@@ -622,25 +547,10 @@ async function tryFuzzySearch(keyword: string): Promise<ProductRecord[]> {
   console.log(`🔍 Trying fuzzy search for: ${keyword}`)
   
   try {
-    // 🎯 Try multiple formats
-    const searchTerm = keyword
-    const compactTerm = keyword.replace(/\s+/g, '').toUpperCase() // "ca 9311" → "CA9311"
-    const numericPart = keyword.match(/\d+/)?.[0] || '' // Extract "9311"
-    
-    console.log(`  🔍 Fuzzy variants: "${searchTerm}", "${compactTerm}", "${numericPart}"`)
-    
     const { data, error } = await supabase
       .from('coatings')
       .select('*')
-      .or(
-        `sku.ilike.%${searchTerm}%,` +
-        `family.ilike.%${searchTerm}%,` +
-        `family.ilike.%${compactTerm}%,` +  // ✅ NEW: Compact format
-        `family.ilike.%${numericPart}%,` +   // ✅ NEW: Just the number
-        `Product_Name.ilike.%${searchTerm}%,` +
-        `Product_Type.ilike.%${searchTerm}%,` +
-        `Product_Model.ilike.%${searchTerm}%`
-      )
+      .or(`sku.ilike.%${keyword}%,family.ilike.%${keyword}%,Product_Name.ilike.%${keyword}%,Product_Type.ilike.%${keyword}%,Product_Model.ilike.%${keyword}%`)
       .limit(20)
     
     if (error) throw error
