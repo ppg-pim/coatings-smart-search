@@ -41,10 +41,10 @@ function cleanProductData(product: ProductRecord): ProductRecord {
           .replace(/&gt;/gi, '>')
           .replace(/&quot;/gi, '"')
           .replace(/&#39;/gi, "'")
-          .replace(/&rsquo;/gi, "'")        // ✅ Fixed
-          .replace(/&lsquo;/gi, "'")        // ✅ Fixed
-          .replace(/&rdquo;/gi, '"')        // ✅ Fixed
-          .replace(/&ldquo;/gi, '"')        // ✅ Fixed
+          .replace(/&rsquo;/gi, "'")        
+          .replace(/&lsquo;/gi, "'")        
+          .replace(/&rdquo;/gi, '"')        
+          .replace(/&ldquo;/gi, '"')        
           .replace(/&deg;/gi, '°')          
           .replace(/&plusmn;/gi, '±')       
           .replace(/&times;/gi, '×')        
@@ -369,21 +369,21 @@ You can filter by any of these categories using the filter options in the search
       
       const summary = `**Coatings Database Overview**
 
-**Total Products:** ${(count || 0).toLocaleString()} coating products
+	**Total Products:** ${(count || 0).toLocaleString()} coating products
 
-**Product Families:** ${families.length} unique families including ${families.slice(0, 5).join(', ')}, and more.
+	**Product Families:** ${families.length} unique families including ${families.slice(0, 5).join(', ')}, and more.
 
-**Search Capabilities:**
-• Natural language search across all product specifications
-• Compare products side-by-side
-• Filter by family, type, and model
-• AI-powered product recommendations
+	**Search Capabilities:**
+	• Natural language search across all product specifications
+	• Compare products side-by-side
+	• Filter by family, type, and model
+	• AI-powered product recommendations
 
-**Example Queries:**
-• "Best coating for corrosion protection"
-• "Compare 44GN011 vs 44GN07"
-• "Show me all primers"
-• "What products are in the CA7000 family?"`
+	**Example Queries:**
+	• "Best coating for corrosion protection"
+	• "Compare 44GN011 vs 44GN07"
+	• "Show me all primers"
+	• "What products are in the CA7000 family?"`
       
       return {
         success: true,
@@ -404,7 +404,6 @@ You can filter by any of these categories using the filter options in the search
   return null
 }
 
-// Parse user query to determine search strategy
 function parseSearchQuery(query: string): SearchParams {
   let processedQuery = query
   const concatenatedPattern = /([a-z0-9]+)(to|vs|versus)([a-z0-9]+)/gi
@@ -420,7 +419,8 @@ function parseSearchQuery(query: string): SearchParams {
     'versus',
     'difference between',
     'different between',
-    'difference of',      // ✅ NEW
+    'difference of',
+    'difference',              // ✅ ADD THIS - catch any "difference" mention
     'differentiation'
   ]
   
@@ -443,7 +443,6 @@ function parseSearchQuery(query: string): SearchParams {
     }
   }
   
-  // Rest of the function remains the same...
   const analyticalPatterns = [
     /what (is|are)/i,
     /tell me about/i,
@@ -490,6 +489,9 @@ function extractComparisonItems(query: string): string[] | null {
   const removeKeywords = [
     'show me the difference of',
     'show me the difference between',
+    'show the difference of',           // ✅ ADD THIS
+    'show the difference between',      // ✅ ADD THIS
+    'show the difference',              // ✅ ADD THIS
     'what is the difference of',
     'what is the difference between',
     'what\'s the difference of',
@@ -518,7 +520,7 @@ function extractComparisonItems(query: string): string[] | null {
     /\s+to\s+/gi,
     /\s+and\s+/gi,
     /\s+with\s+/gi,
-    /\s*,\s*/g
+    /\s*,\s*/g                          // ✅ This handles commas
   ]
   
   separators.forEach(sep => {
@@ -540,6 +542,9 @@ function extractComparisonItems(query: string): string[] | null {
     console.log(`  📦 Extracted ${items.length} items: ${items.join(', ')}`)
     return items
   }
+  
+  console.log(`  ⚠️ Failed to extract comparison items from: "${query}"`)
+  console.log(`  🔍 After cleaning: "${cleaned}"`)
   
   return null
 }
@@ -1028,63 +1033,128 @@ export async function POST(req: NextRequest) {
     // Clean products
     const cleanedProducts = rankedResults.map(p => cleanProductData(p))
     
-    // 🎯 Handle comparison queries with SMART AI
-    if (searchParams.questionType === "comparison") {
-      console.log(`> 📊 Comparison mode - using smart AI analysis`)
-      
-      const productsByKeyword = new Map<string, ProductRecord[]>()
-      
-      searchKeywords.forEach(keyword => {
-        const matchingProducts = cleanedProducts.filter(product => {
-          const searchText = Object.values(product)
-            .filter(v => typeof v === 'string')
-            .join(' ')
-            .toLowerCase()
-          return searchText.includes(keyword.toLowerCase())
-        })
-        
-        if (matchingProducts.length > 0) {
-          productsByKeyword.set(keyword, matchingProducts)
-        }
-      })
-      
-      const comparisonProducts: ProductRecord[] = []
-      
-      productsByKeyword.forEach((products, keyword) => {
-        comparisonProducts.push(products[0])
-      })
-      
-      const missingKeywords = searchKeywords.filter(k => !Array.from(productsByKeyword.keys()).includes(k))
-      
-      if (missingKeywords.length > 0) {
-        for (const keyword of missingKeywords) {
-          const fuzzyResults = await tryFuzzySearch(keyword)
-          if (fuzzyResults.length > 0) {
-            comparisonProducts.push(cleanProductData(fuzzyResults[0]))
-          }
-        }
-      }
-      
-      const uniqueProducts = Array.from(
-        new Map(comparisonProducts.map(p => [p.sku?.toLowerCase(), p])).values()
-      )
-      
-      console.log(`> 🤖 Generating SMART AI comparison analysis`)
-      const aiSummary = await generateSmartAIAnalysis(uniqueProducts, query, 'comparison')
-      
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-      console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
-      console.log(`${'='.repeat(80)}\n`)
-      
-      return NextResponse.json({
-        success: true,
-        questionType: "comparison",
-        products: uniqueProducts,
-        summary: aiSummary,
-        count: uniqueProducts.length,
-        message: `Comparing ${uniqueProducts.length} product(s)`
-      })
-    }
+	// 🎯 Handle comparison queries with SMART AI
+	if (searchParams.questionType === "comparison") {
+	  console.log(`> 📊 Comparison mode - using smart AI analysis`)
+	  
+	  const productsByKeyword = new Map<string, ProductRecord[]>()
+	  
+	  // 🎯 Helper function to normalize family names
+	  const normalizeFamily = (str: string): string => {
+		return str.replace(/[\s_-]/g, '').toUpperCase() // Remove spaces, underscores, hyphens
+	  }
+	  
+	  searchKeywords.forEach(keyword => {
+		const normalizedKeyword = normalizeFamily(keyword) // "ca 8800 b900" → "CA8800B900"
+		
+		console.log(`  🔍 Looking for "${keyword}" (normalized: "${normalizedKeyword}")`)
+		
+		const matchingProducts = cleanedProducts.filter(product => {
+		  const productFamily = normalizeFamily(product.family || '') // "CA8800_B900" → "CA8800B900"
+		  
+		  // ✅ Try exact normalized family match
+		  if (productFamily === normalizedKeyword) {
+			return true
+		  }
+		  
+		  // ✅ Try if normalized keyword is at the start of family
+		  if (productFamily.startsWith(normalizedKeyword)) {
+			return true
+		  }
+		  
+		  // ✅ Try SKU match
+		  const normalizedSKU = normalizeFamily(product.sku || '')
+		  if (normalizedSKU.includes(normalizedKeyword)) {
+			return true
+		  }
+		  
+		  // ✅ Try Product_Model match
+		  const normalizedModel = normalizeFamily(product.Product_Model || '')
+		  if (normalizedModel.includes(normalizedKeyword)) {
+			return true
+		  }
+		  
+		  return false
+		})
+		
+		if (matchingProducts.length > 0) {
+		  console.log(`  ✓ Found ${matchingProducts.length} products for "${keyword}" (Family: ${matchingProducts[0].family})`)
+		  productsByKeyword.set(keyword, matchingProducts)
+		} else {
+		  console.log(`  ⚠️ No products found for "${keyword}"`)
+		}
+	  })
+	  
+	  const comparisonProducts: ProductRecord[] = []
+	  
+	  // Get the best match for each keyword
+	  productsByKeyword.forEach((products, keyword) => {
+		const normalizedKeyword = normalizeFamily(keyword)
+		
+		// Sort by relevance: exact match first, then startsWith
+		const sorted = products.sort((a, b) => {
+		  const aFamily = normalizeFamily(a.family || '')
+		  const bFamily = normalizeFamily(b.family || '')
+		  
+		  // Exact match gets highest priority
+		  if (aFamily === normalizedKeyword && bFamily !== normalizedKeyword) return -1
+		  if (bFamily === normalizedKeyword && aFamily !== normalizedKeyword) return 1
+		  
+		  // StartsWith gets second priority
+		  if (aFamily.startsWith(normalizedKeyword) && !bFamily.startsWith(normalizedKeyword)) return -1
+		  if (bFamily.startsWith(normalizedKeyword) && !aFamily.startsWith(normalizedKeyword)) return 1
+		  
+		  return 0
+		})
+		
+		comparisonProducts.push(sorted[0])
+	  })
+	  
+	  console.log(`> 📦 Selected ${comparisonProducts.length} products for comparison:`)
+	  comparisonProducts.forEach((p, idx) => {
+		console.log(`>    ${idx + 1}. Family: ${p.family}, SKU: ${p.sku}`)
+	  })
+	  
+	  // Handle missing keywords with fuzzy search
+	  const missingKeywords = searchKeywords.filter(k => !Array.from(productsByKeyword.keys()).includes(k))
+	  
+	  if (missingKeywords.length > 0) {
+		console.log(`> 🔍 Trying fuzzy search for missing keywords: ${missingKeywords.join(', ')}`)
+		for (const keyword of missingKeywords) {
+		  const fuzzyResults = await tryFuzzySearch(keyword)
+		  if (fuzzyResults.length > 0) {
+			console.log(`  ✓ Fuzzy search found result for "${keyword}": ${fuzzyResults[0].family}`)
+			comparisonProducts.push(cleanProductData(fuzzyResults[0]))
+		  }
+		}
+	  }
+	  
+	  // Remove duplicates by normalized family name (to prevent CA8800 and CA 8800 being treated as different)
+	  const uniqueProducts = Array.from(
+		new Map(comparisonProducts.map(p => [normalizeFamily(p.family || ''), p])).values()
+	  )
+	  
+	  console.log(`> 🎯 Final comparison: ${uniqueProducts.length} unique products`)
+	  uniqueProducts.forEach((p, idx) => {
+		console.log(`>    ${idx + 1}. Family: ${p.family}, SKU: ${p.sku}`)
+	  })
+	  
+	  console.log(`> 🤖 Generating SMART AI comparison analysis`)
+	  const aiSummary = await generateSmartAIAnalysis(uniqueProducts, query, 'comparison')
+	  
+	  const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+	  console.log(` POST /api/coatings-smart-search 200 in ${duration}s`)
+	  console.log(`${'='.repeat(80)}\n`)
+	  
+	  return NextResponse.json({
+		success: true,
+		questionType: "comparison",
+		products: uniqueProducts,
+		summary: aiSummary,
+		count: uniqueProducts.length,
+		message: `Comparing ${uniqueProducts.length} product(s)`
+	  })
+	}
     
     // 🎯 Handle analytical queries with SMART AI
     if (searchParams.questionType === "analytical") {
