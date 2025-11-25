@@ -41,10 +41,10 @@ function cleanProductData(product: ProductRecord): ProductRecord {
           .replace(/&gt;/gi, '>')
           .replace(/&quot;/gi, '"')
           .replace(/&#39;/gi, "'")
-          .replace(/&rsquo;/gi, "'")        
-          .replace(/&lsquo;/gi, "'")        
-          .replace(/&rdquo;/gi, '"')        
-          .replace(/&ldquo;/gi, '"')        
+          .replace(/&rsquo;/gi, "'")        // ✅ Fixed
+          .replace(/&lsquo;/gi, "'")        // ✅ Fixed
+          .replace(/&rdquo;/gi, '"')        // ✅ Fixed
+          .replace(/&ldquo;/gi, '"')        // ✅ Fixed
           .replace(/&deg;/gi, '°')          
           .replace(/&plusmn;/gi, '±')       
           .replace(/&times;/gi, '×')        
