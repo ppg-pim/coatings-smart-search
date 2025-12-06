@@ -12,7 +12,7 @@
     "@supabase/supabase-js": "^2.45.4",
     "mongodb": "^7.0.0",
     "next": "^16.0.2",
-    "openai": "^4.67.3",
+    "openai": "^6.10.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -21,6 +21,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.22",
+    "baseline-browser-mapping": "^2.9.0",
     "eslint": "^9.39.1",
     "eslint-config-next": "^16.0.2",
     "postcss": "^8.5.6",

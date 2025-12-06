@@ -30,9 +30,9 @@ export default function CoatingsPage() {
     loadFilterOptionsInline()
   }, [])
 
-  // Enhanced markdown rendering function with improved readability for AI analysis
+  // Enhanced markdown rendering function with table support
   const renderMarkdown = (markdown: string, colorClass: string = 'green'): string => {
-    let html = markdown;
+    let html = markdown
     
     // Color class mappings (Tailwind-safe - no dynamic classes)
     const colors: { [key: string]: { heading: string; text: string; bold: string } } = {
@@ -40,148 +40,60 @@ export default function CoatingsPage() {
       indigo: { heading: 'text-indigo-800', text: 'text-indigo-900', bold: 'text-indigo-900' },
       purple: { heading: 'text-purple-800', text: 'text-purple-900', bold: 'text-purple-900' },
       blue: { heading: 'text-blue-800', text: 'text-blue-900', bold: 'text-blue-900' }
-    };
+    }
     
-    const color = colors[colorClass] || colors.green;
+    const color = colors[colorClass] || colors.green
     
     // 1. Handle markdown tables FIRST (before other replacements)
-    const tablePattern = /\n\|(.+)\|\n\|[\-:\s|]+\|\n((?:\|.+\|\n?)+)/g;
+    // Fixed regex pattern to avoid CSS conflicts
+    const tablePattern = /\n\|(.+)\|\n\|[\-:\s|]+\|\n((?:\|.+\|\n?)+)/g
     html = html.replace(tablePattern, (match, header, rows) => {
-      // Split header and filter out empty cells
-      const headerCells = header
-        .split('|')
-        .map((cell: string) => cell.trim())
-        .filter((cell: string) => cell !== '' && cell !== '-');
+      const headerCells = header.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
+        `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell.trim()}</th>`
+      ).join('')
       
-      // Process each row
-      const bodyRowsArray = rows.trim().split('\n').map((row: string) => {
-        const cells = row
-          .split('|')
-          .map((cell: string) => cell.trim())
-          .filter((cell: string) => cell !== '' && cell !== '-');
-        return cells;
-      });
+      const bodyRows = rows.trim().split('\n').map((row: string) => {
+        const cells = row.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
+          `<td class="px-4 py-3 text-sm text-gray-800 border-b border-gray-200">${cell.trim()}</td>`
+        ).join('')
+        return `<tr class="hover:bg-gray-50">${cells}</tr>`
+      }).join('')
       
-      // Generate table HTML
-      const headerHTML = headerCells
-        .map((cell: string) => 
-          `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell}</th>`
-        )
-        .join('');
-      
-      const bodyHTML = bodyRowsArray
-        .map((cells: string[]) => {
-          const cellsHTML = cells
-            .map((cell: string) => 
-              `<td class="px-4 py-3 text-sm text-gray-800 border-b border-gray-200">${cell || '-'}</td>`
-            )
-            .join('');
-          return `<tr class="hover:bg-gray-50">${cellsHTML}</tr>`;
-        })
-        .join('');
-      
-      return `<div class="overflow-x-auto my-6 rounded-lg shadow-sm"><table class="min-w-full bg-white border border-gray-300 rounded-lg"><thead><tr>${headerHTML}</tr></thead><tbody>${bodyHTML}</tbody></table></div>`;
-    });
+      return `<div class="overflow-x-auto my-6"><table class="min-w-full bg-white border border-gray-300 rounded-lg shadow-sm"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`
+    })
     
-    // 2. Handle headings with better spacing
-    html = html.replace(/### (.*?)(\n|$)/g, `<h3 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h3>`);
-    html = html.replace(/## (.*?)(\n|$)/g, `<h2 class="text-2xl font-bold ${color.text} mt-6 mb-4">$1</h2>`);
-    html = html.replace(/# (.*?)(\n|$)/g, `<h1 class="text-3xl font-bold ${color.text} mt-6 mb-4">$1</h1>`);
+    // 2. Handle headings
+    html = html.replace(/### (.*?)(\n|$)/g, `<h3 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h3>`)
+    html = html.replace(/## (.*?)(\n|$)/g, `<h2 class="text-2xl font-bold ${color.text} mt-6 mb-4">$1</h2>`)
+    html = html.replace(/# (.*?)(\n|$)/g, `<h1 class="text-3xl font-bold ${color.text} mt-6 mb-4">$1</h1>`)
     
     // 3. Handle bold text
-    html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`);
+    html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
     
-    // 4. Clean up any existing bullet points (•) that AI might have added
-    html = html.replace(/\n•\s*/g, '\n- ');
-    html = html.replace(/^•\s*/gm, '- ');
+    // 4. Handle bullet lists (convert - to •)
+    html = html.replace(/\n- /g, '\n• ')
     
-    // 5. Handle section headers (text ending with colon)
-    html = html.replace(/^([A-Z][^:\n]+):$/gm, `<div class="font-semibold text-lg ${color.text} mt-5 mb-3">$1:</div>`);
+    // 5. Handle paragraphs
+    const lines = html.split('\n\n')
+    const processedLines = lines.map(line => {
+      // Skip if already HTML
+      if (line.trim().startsWith('<')) return line
+      // Skip empty lines
+      if (line.trim() === '') return ''
+      // Wrap in paragraph
+      return `<p class="mt-4">${line}</p>`
+    })
+    html = processedLines.join('')
     
-    // 6. Process lists - identify and convert list blocks
-    const lines = html.split('\n');
-    const processedLines: string[] = [];
-    let inList = false;
-    let listItems: string[] = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmedLine = line.trim();
-      
-      // Skip if this line is part of a table (already processed)
-      if (trimmedLine.startsWith('<div class="overflow-x-auto') || trimmedLine.startsWith('<table') || trimmedLine.includes('</table>')) {
-        if (inList) {
-          // Close any open list before the table
-          processedLines.push(
-            '<ul class="space-y-2 my-4 pl-0">' +
-            listItems.map(item => 
-              `<li class="flex items-start"><span class="inline-block mr-3 mt-1 text-${colorClass}-600 flex-shrink-0">•</span><span class="flex-1">${item}</span></li>`
-            ).join('') +
-            '</ul>'
-          );
-          inList = false;
-          listItems = [];
-        }
-        processedLines.push(line);
-        continue;
-      }
-      
-      // Check if this is a list item
-      if (trimmedLine.startsWith('- ')) {
-        if (!inList) {
-          inList = true;
-          listItems = [];
-        }
-        // Remove the dash and add to list items
-        listItems.push(trimmedLine.substring(2).trim());
-      } else {
-        // Not a list item - close any open list
-        if (inList) {
-          // Output the accumulated list
-          processedLines.push(
-            '<ul class="space-y-2 my-4 pl-0">' +
-            listItems.map(item => 
-              `<li class="flex items-start"><span class="inline-block mr-3 mt-1 text-${colorClass}-600 flex-shrink-0">•</span><span class="flex-1">${item}</span></li>`
-            ).join('') +
-            '</ul>'
-          );
-          inList = false;
-          listItems = [];
-        }
-        
-        // Add the non-list line
-        if (trimmedLine && !trimmedLine.startsWith('<')) {
-          processedLines.push(`<p class="my-3 leading-relaxed">${line}</p>`);
-        } else if (trimmedLine.startsWith('<')) {
-          processedLines.push(line);
-        } else {
-          processedLines.push(line);
-        }
-      }
-    }
-    
-    // Close any remaining open list
-    if (inList && listItems.length > 0) {
-      processedLines.push(
-        '<ul class="space-y-2 my-4 pl-0">' +
-        listItems.map(item => 
-          `<li class="flex items-start"><span class="inline-block mr-3 mt-1 text-${colorClass}-600 flex-shrink-0">•</span><span class="flex-1">${item}</span></li>`
-        ).join('') +
-        '</ul>'
-      );
-    }
-    
-    html = processedLines.join('\n');
+    // 6. Handle lists within paragraphs
+    html = html.replace(/<p class="mt-4">• /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
+    html = html.replace(/\n• /g, '</li><li>')
+    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/g, '</li><li>$1</li></ul>')
     
     // 7. Clean up empty paragraphs
-    html = html.replace(/<p class="my-3 leading-relaxed"><\/p>/g, '');
-    html = html.replace(/<p class="my-3 leading-relaxed">\s*<\/p>/g, '');
+    html = html.replace(/<p class="mt-4"><\/p>/g, '')
     
-    // 8. Handle nested lists (sub-items with extra indentation)
-    html = html.replace(/<li class="flex items-start"><span class="inline-block mr-3 mt-1 text-[^"]*-600 flex-shrink-0">•<\/span><span class="flex-1">\s*-\s*/g, 
-      '<li class="flex items-start ml-6"><span class="inline-block mr-3 mt-1 text-gray-500 flex-shrink-0">◦</span><span class="flex-1">');
-    
-    return html;
+    return html
   }
 
   const loadFilterOptionsInline = async () => {
@@ -453,23 +365,23 @@ export default function CoatingsPage() {
     return (
       <div className="mb-8">
         <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-4 sm:p-6">
+          <div className="p-6">
             <div className="flex items-start mb-4">
               <div className="flex-shrink-0">
-                <svg className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
               </div>
-              <div className="ml-3 sm:ml-4 flex-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
-                <p className="text-green-700 text-xs sm:text-sm">
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
+                <p className="text-green-700 text-sm">
                   Based on analysis of {analyticalData.count} coating product(s)
                   {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
                 </p>
               </div>
             </div>
             
-            <div className="prose prose-green max-w-none text-sm sm:text-base">
+            <div className="prose prose-green max-w-none">
               <div 
                 className="text-gray-800 leading-relaxed"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(analyticalData.summary, 'green') }}
@@ -479,19 +391,19 @@ export default function CoatingsPage() {
         </div>
 
         {analyticalData.count > 0 && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
               <div className="flex items-center">
-                <svg className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span className="text-xs sm:text-sm font-medium text-blue-900">
+                <span className="text-sm font-medium text-blue-900">
                   {analyticalData.count} coating product reference{analyticalData.count !== 1 ? 's' : ''} available below
                 </span>
               </div>
               <button
                 onClick={scrollToProducts}
-                className="relative z-10 text-xs sm:text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer whitespace-nowrap"
+                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
                 View Details →
@@ -509,16 +421,16 @@ export default function CoatingsPage() {
     return (
       <div className="mb-8">
         <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-l-4 border-indigo-500 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-4 sm:p-6">
+          <div className="p-6">
             <div className="flex items-start mb-4">
               <div className="flex-shrink-0">
-                <svg className="h-6 w-6 sm:h-8 sm:w-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-8 w-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
               </div>
-              <div className="ml-3 sm:ml-4 flex-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-indigo-900 mb-2">Database Information</h2>
-                <p className="text-indigo-700 text-xs sm:text-sm">
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-indigo-900 mb-2">Database Information</h2>
+                <p className="text-indigo-700 text-sm">
                   {metaQuestionData.metaType === 'count' && 'Product count summary'}
                   {metaQuestionData.metaType === 'list' && 'Available product categories'}
                   {metaQuestionData.metaType === 'overview' && 'Complete database overview'}
@@ -527,7 +439,7 @@ export default function CoatingsPage() {
               </div>
             </div>
             
-            <div className="prose prose-indigo max-w-none text-sm sm:text-base">
+            <div className="prose prose-indigo max-w-none">
               <div 
                 className="text-gray-800 leading-relaxed"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(metaQuestionData.summary, 'indigo') }}
@@ -537,8 +449,8 @@ export default function CoatingsPage() {
             {metaQuestionData.count !== undefined && (
               <div className="mt-4 pt-4 border-t border-indigo-200">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs sm:text-sm font-medium text-indigo-700">Total Count:</span>
-                  <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full font-semibold text-sm">
+                  <span className="text-sm font-medium text-indigo-700">Total Count:</span>
+                  <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full font-semibold">
                     {metaQuestionData.count.toLocaleString()}
                   </span>
                 </div>
@@ -548,19 +460,19 @@ export default function CoatingsPage() {
         </div>
 
         {results.length > 0 && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
               <div className="flex items-center">
-                <svg className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span className="text-xs sm:text-sm font-medium text-blue-900">
+                <span className="text-sm font-medium text-blue-900">
                   {results.length} coating product reference{results.length !== 1 ? 's' : ''} available below
                 </span>
               </div>
               <button
                 onClick={scrollToProducts}
-                className="relative z-10 text-xs sm:text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer whitespace-nowrap"
+                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
                 View Details →
@@ -594,9 +506,9 @@ export default function CoatingsPage() {
 
     return (
       <div className="mb-8">
-        <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-4 sm:p-6 rounded-lg">
-          <h2 className="text-xl sm:text-2xl font-bold text-blue-900 mb-2">Coating Product Comparison</h2>
-          <p className="text-blue-700 text-xs sm:text-sm">
+        <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 rounded-lg">
+          <h2 className="text-2xl font-bold text-blue-900 mb-2">Coating Product Comparison</h2>
+          <p className="text-blue-700">
             Comparing {products.length} coating products - Differences are highlighted
             {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
           </p>
@@ -604,22 +516,22 @@ export default function CoatingsPage() {
 
         {comparisonData.summary && (
           <div className="mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
-            <div className="p-4 sm:p-6">
+            <div className="p-6">
               <div className="flex items-start mb-4">
                 <div className="flex-shrink-0">
-                  <svg className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
                 </div>
-                <div className="ml-3 sm:ml-4 flex-1">
-                  <h3 className="text-lg sm:text-xl font-bold text-purple-900 mb-2">AI Comparison Analysis</h3>
-                  <p className="text-purple-700 text-xs sm:text-sm">
+                <div className="ml-4 flex-1">
+                  <h3 className="text-xl font-bold text-purple-900 mb-2">AI Comparison Analysis</h3>
+                  <p className="text-purple-700 text-sm">
                     Detailed comparison of {products.length} products
                   </p>
                 </div>
               </div>
               
-              <div className="prose prose-purple max-w-none text-sm sm:text-base">
+              <div className="prose prose-purple max-w-none">
                 <div 
                   className="text-gray-800 leading-relaxed"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(comparisonData.summary, 'purple') }}
@@ -631,16 +543,16 @@ export default function CoatingsPage() {
 
         <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px]">
+            <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b-2 border-gray-200">
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700 sticky left-0 bg-gray-50 z-10">
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 w-1/4 sticky left-0 bg-gray-50 z-10">
                     Attribute
                   </th>
                   {products.map((product: any, idx: number) => (
                     <th 
                       key={idx} 
-                      className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold"
+                      className="px-6 py-4 text-left text-sm font-semibold"
                       style={{ color: '#0078a9' }}
                     >
                       <div className="font-bold">{product.sku || product.Product_Name || `Product ${idx + 1}`}</div>
@@ -659,18 +571,18 @@ export default function CoatingsPage() {
                       key={key} 
                       className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
                     >
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-700 sticky left-0 bg-white z-10">
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-700 sticky left-0 bg-white z-10">
                         <div className="flex items-center gap-2">
                           {formatFieldName(key)}
                           {different && (
-                            <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Different values"></span>
+                            <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full" title="Different values"></span>
                           )}
                         </div>
                       </td>
                       {products.map((product: any, idx: number) => (
                         <td 
                           key={idx} 
-                          className={`px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
+                          className={`px-6 py-4 text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
                         >
                           {formatValue(key, product[key]) || '-'}
                         </td>
@@ -682,7 +594,7 @@ export default function CoatingsPage() {
                 {technical.length > 0 && (
                   <>
                     <tr className="bg-gray-100">
-                      <td colSpan={products.length + 1} className="px-3 sm:px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
+                      <td colSpan={products.length + 1} className="px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
                         Technical Specifications
                       </td>
                     </tr>
@@ -694,18 +606,18 @@ export default function CoatingsPage() {
                           key={key} 
                           className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
                         >
-                          <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-gray-700 sticky left-0 bg-white z-10">
+                          <td className="px-6 py-3 text-sm text-gray-700 sticky left-0 bg-white z-10">
                             <div className="flex items-center gap-2">
                               {formatFieldName(key)}
                               {different && (
-                                <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Different values"></span>
+                                <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full" title="Different values"></span>
                               )}
                             </div>
                           </td>
                           {products.map((product: any, idx: number) => (
                             <td 
                               key={idx} 
-                              className={`px-3 sm:px-6 py-3 text-xs sm:text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
+                              className={`px-6 py-3 text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
                             >
                               {formatValue(key, product[key]) || '-'}
                             </td>
@@ -720,8 +632,8 @@ export default function CoatingsPage() {
           </div>
         </div>
 
-        <div className="mt-4 flex items-center gap-2 text-xs sm:text-sm text-gray-600">
-          <span className="inline-block w-3 h-3 bg-yellow-50 border border-yellow-200 rounded flex-shrink-0"></span>
+        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+          <span className="inline-block w-3 h-3 bg-yellow-50 border border-yellow-200 rounded"></span>
           <span>Highlighted rows indicate differences between coating products</span>
         </div>
       </div>
@@ -734,23 +646,23 @@ export default function CoatingsPage() {
     return (
       <div className="mb-8">
         <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-4 sm:p-6">
+          <div className="p-6">
             <div className="flex items-start mb-4">
               <div className="flex-shrink-0">
-                <svg className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
               </div>
-              <div className="ml-3 sm:ml-4 flex-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
-                <p className="text-green-700 text-xs sm:text-sm">
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
+                <p className="text-green-700 text-sm">
                   Based on analysis of {specificAnswer.count} coating product(s)
                   {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
                 </p>
               </div>
             </div>
             
-            <div className="prose prose-green max-w-none text-sm sm:text-base">
+            <div className="prose prose-green max-w-none">
               <div 
                 className="text-gray-800 leading-relaxed"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(specificAnswer.summary, 'green') }}
@@ -760,19 +672,19 @@ export default function CoatingsPage() {
         </div>
 
         {specificAnswer.count > 0 && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
               <div className="flex items-center">
-                <svg className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span className="text-xs sm:text-sm font-medium text-blue-900">
+                <span className="text-sm font-medium text-blue-900">
                   {specificAnswer.count} coating product reference{specificAnswer.count !== 1 ? 's' : ''} available below
                 </span>
               </div>
               <button
                 onClick={scrollToProducts}
-                className="relative z-10 text-xs sm:text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer whitespace-nowrap"
+                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
                 type="button"
               >
                 View Details →
@@ -785,84 +697,81 @@ export default function CoatingsPage() {
   }
 
   return (
-    <main className="min-h-screen p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto bg-gray-50">
-      <div className="bg-white rounded-lg shadow-sm p-4 sm:p-6 lg:p-8 mb-6 sm:mb-8">
-        <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2 text-center" style={{ color: '#0078a9' }}>
+    <main className="min-h-screen p-8 max-w-7xl mx-auto bg-gray-50">
+      <div className="bg-white rounded-lg shadow-sm p-8 mb-8">
+        <h1 className="text-4xl font-bold mb-2 text-center" style={{ color: '#0078a9' }}>
           Coatings Smart Search
         </h1>
-        <p className="text-center text-gray-600 mb-6 sm:mb-8 text-sm sm:text-base">
+        <p className="text-center text-gray-600 mb-8">
           Search coating products using natural language • Powered by AI
         </p>
 
         <form onSubmit={handleSearch}>
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 mb-4">
+          <div className="flex gap-4 mb-4">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask anything... (e.g., 'Best coating for corrosion protection')"
-              className="flex-1 px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent text-sm sm:text-base"
+              placeholder="Ask anything... (e.g., 'Best coating for corrosion protection', 'Compare CA 8110 and CA 8200', 'Tell me about 02GN093')"
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
-            <div className="flex gap-2 sm:gap-4">
-              <button
-                type="button"
-                onClick={() => setShowFilters(!showFilters)}
-                className="flex-1 sm:flex-none px-4 sm:px-6 py-2 sm:py-3 border-2 rounded-lg font-medium transition-colors text-sm sm:text-base"
-                style={{ 
-                  borderColor: '#0078a9',
-                  color: showFilters ? '#fff' : '#0078a9',
-                  backgroundColor: showFilters ? '#0078a9' : 'transparent'
-                }}
-              >
-                <svg className="w-4 h-4 sm:w-5 sm:h-5 inline-block mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                <span className="hidden sm:inline">Filters</span>
-                <span className="sm:hidden">Filter</span>
-                {hasActiveFilters && (
-                  <span className="ml-1 sm:ml-2 inline-flex items-center justify-center w-4 h-4 sm:w-5 sm:h-5 text-xs font-bold text-white bg-red-500 rounded-full">
-                    {[selectedFamily, selectedProductType, selectedProductModel].filter(Boolean).length}
-                  </span>
-                )}
-              </button>
-              <button
-                type="submit"
-                disabled={loading || !query.trim()}
-                className="flex-1 sm:flex-none px-6 sm:px-8 py-2 sm:py-3 text-white rounded-lg hover:opacity-90 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors text-sm sm:text-base"
-                style={{ backgroundColor: '#0078a9' }}
-              >
-                {loading ? 'Searching...' : 'Search'}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowFilters(!showFilters)}
+              className="px-6 py-3 border-2 rounded-lg font-medium transition-colors"
+              style={{ 
+                borderColor: '#0078a9',
+                color: showFilters ? '#fff' : '#0078a9',
+                backgroundColor: showFilters ? '#0078a9' : 'transparent'
+              }}
+            >
+              <svg className="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+              Filters
+              {hasActiveFilters && (
+                <span className="ml-2 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
+                  {[selectedFamily, selectedProductType, selectedProductModel].filter(Boolean).length}
+                </span>
+              )}
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !query.trim()}
+              className="px-8 py-3 text-white rounded-lg hover:opacity-90 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+              style={{ backgroundColor: '#0078a9' }}
+            >
+              {loading ? 'Searching...' : 'Search'}
+            </button>
           </div>
 
           {showFilters && (
-            <div className="border border-gray-200 rounded-lg p-4 sm:p-6 bg-gray-50">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-2">
-                <h3 className="text-base sm:text-lg font-semibold" style={{ color: '#0078a9' }}>
-                  Filter Options {loadingFilters && <span className="text-xs sm:text-sm font-normal text-gray-500">(Loading...)</span>}
+            <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold" style={{ color: '#0078a9' }}>
+                  Filter Options {loadingFilters && <span className="text-sm font-normal text-gray-500">(Loading...)</span>}
                 </h3>
                 {hasActiveFilters && (
                   <button
                     type="button"
                     onClick={clearFilters}
-                    className="text-xs sm:text-sm text-red-600 hover:text-red-800 font-medium"
+                    className="text-sm text-red-600 hover:text-red-800 font-medium"
                   >
                     Clear All Filters
                   </button>
                 )}
               </div>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Family ({familyOptions.length} options)
                   </label>
                   <select
                     value={selectedFamily}
                     onChange={(e) => setSelectedFamily(e.target.value)}
                     disabled={loadingFilters}
-                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100 text-sm sm:text-base"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Families</option>
                     {familyOptions.map((option) => (
@@ -874,14 +783,14 @@ export default function CoatingsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Type ({productTypeOptions.length} options)
                   </label>
                   <select
                     value={selectedProductType}
                     onChange={(e) => setSelectedProductType(e.target.value)}
                     disabled={loadingFilters}
-                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100 text-sm sm:text-base"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Types</option>
                     {productTypeOptions.map((option) => (
@@ -892,15 +801,15 @@ export default function CoatingsPage() {
                   </select>
                 </div>
 
-                <div className="sm:col-span-2 lg:col-span-1">
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Model ({productModelOptions.length} options)
                   </label>
                   <select
                     value={selectedProductModel}
                     onChange={(e) => setSelectedProductModel(e.target.value)}
                     disabled={loadingFilters}
-                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100 text-sm sm:text-base"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Models</option>
                     {productModelOptions.map((option) => (
@@ -914,38 +823,38 @@ export default function CoatingsPage() {
 
               {hasActiveFilters && (
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="text-xs sm:text-sm text-gray-600">Active filters:</span>
+                  <span className="text-sm text-gray-600">Active filters:</span>
                   {selectedFamily && (
-                    <span className="inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-blue-100 text-blue-800">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                       Family: {selectedFamily}
                       <button
                         type="button"
                         onClick={() => setSelectedFamily('')}
-                        className="ml-1 sm:ml-2 text-blue-600 hover:text-blue-800"
+                        className="ml-2 text-blue-600 hover:text-blue-800"
                       >
                         ×
                       </button>
                     </span>
                   )}
                   {selectedProductType && (
-                    <span className="inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-green-100 text-green-800">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
                       Type: {selectedProductType}
                       <button
                         type="button"
                         onClick={() => setSelectedProductType('')}
-                        className="ml-1 sm:ml-2 text-green-600 hover:text-green-800"
+                        className="ml-2 text-green-600 hover:text-green-800"
                       >
                         ×
                       </button>
                     </span>
                   )}
                   {selectedProductModel && (
-                    <span className="inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-purple-100 text-purple-800">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
                       Model: {selectedProductModel}
                       <button
                         type="button"
                         onClick={() => setSelectedProductModel('')}
-                        className="ml-1 sm:ml-2 text-purple-600 hover:text-purple-800"
+                        className="ml-2 text-purple-600 hover:text-purple-800"
                       >
                         ×
                       </button>
@@ -959,25 +868,25 @@ export default function CoatingsPage() {
       </div>
 
       {loading && (
-        <div className="text-center py-8 sm:py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="inline-block animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-[#0078a9] mb-4"></div>
-          <p className="text-base sm:text-lg font-medium text-gray-700">Searching coating products...</p>
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9] mb-4"></div>
+          <p className="text-lg font-medium text-gray-700">Searching coating products...</p>
           {searchProgress && (
-            <p className="mt-2 text-xs sm:text-sm text-gray-600">{searchProgress}</p>
+            <p className="mt-2 text-sm text-gray-600">{searchProgress}</p>
           )}
-          <p className="mt-2 text-xs text-gray-400">Optimized search • Typically completes in 15-30 seconds</p>
+          <p className="mt-2 text-xs text-gray-400">Optimized search • Typically completes in 2-5 seconds</p>
         </div>
       )}
 
       {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 sm:p-6 rounded-lg shadow-sm">
-          <div className="flex items-start">
-            <svg className="h-5 w-5 sm:h-6 sm:w-6 text-red-500 mr-3 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg shadow-sm">
+          <div className="flex items-center">
+            <svg className="h-6 w-6 text-red-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div>
-              <h3 className="text-base sm:text-lg font-semibold text-red-800">Search Error</h3>
-              <p className="text-red-700 mt-1 text-sm sm:text-base">{error}</p>
+              <h3 className="text-lg font-semibold text-red-800">Search Error</h3>
+              <p className="text-red-700 mt-1">{error}</p>
             </div>
           </div>
         </div>
@@ -991,61 +900,61 @@ export default function CoatingsPage() {
           {renderComparison()}
 
           {results.length > 0 && !comparisonData && (
-            <div id="product-references" className="bg-white rounded-lg shadow-sm p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 gap-3">
-                <h2 className="text-xl sm:text-2xl font-bold" style={{ color: '#0078a9' }}>
+            <div id="product-references" className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold" style={{ color: '#0078a9' }}>
                   {analyticalData || metaQuestionData ? 'Product References' : 'Search Results'}
                 </h2>
-                <div className="flex items-center gap-3 sm:gap-4">
+                <div className="flex items-center gap-4">
                   {searchTime && (
-                    <span className="text-xs sm:text-sm text-gray-500">
+                    <span className="text-sm text-gray-500">
                       ⚡ {searchTime}s
                     </span>
                   )}
-                  <span className="px-3 sm:px-4 py-1 sm:py-2 bg-blue-100 text-blue-800 rounded-full text-xs sm:text-sm font-semibold">
+                  <span className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
                     {results.length} {results.length === 1 ? 'Product' : 'Products'}
                   </span>
                 </div>
               </div>
 
-              <div className="space-y-4 sm:space-y-6">
+              <div className="space-y-6">
                 {results.map((product, index) => {
                   const { header, other } = groupAttributes(product)
                   
                   return (
                     <div 
                       key={index} 
-                      className="border border-gray-200 rounded-lg p-4 sm:p-6 hover:shadow-md transition-shadow bg-gray-50"
+                      className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow bg-gray-50"
                     >
                       <div className="mb-4 pb-4 border-b border-gray-300">
                         {Object.entries(header).map(([key, value]) => (
                           <div key={key} className="mb-2">
-                            <span className="font-bold text-base sm:text-lg" style={{ color: '#0078a9' }}>
+                            <span className="font-bold text-lg" style={{ color: '#0078a9' }}>
                               {formatFieldName(key)}:
                             </span>
                             <span 
-                              className="ml-2 text-gray-800 text-base sm:text-lg break-words"
+                              className="ml-2 text-gray-800 text-lg"
                               dangerouslySetInnerHTML={{ __html: formatValue(key, value) }}
                             />
                           </div>
                         ))}
                         {product._sourceTable && (
                           <div className="mt-2">
-                            <span className="inline-block px-2 sm:px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-semibold">
+                            <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-semibold">
                               Found in: {product._sourceTable}
                             </span>
                           </div>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {Object.entries(other).map(([key, value]) => (
                           <div key={key} className="flex flex-col">
-                            <span className="text-xs sm:text-sm font-semibold text-gray-600 mb-1">
+                            <span className="text-sm font-semibold text-gray-600 mb-1">
                               {formatFieldName(key)}
                             </span>
                             <span 
-                              className="text-xs sm:text-sm text-gray-800 bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap break-words"
+                              className="text-sm text-gray-800 bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap"
                               dangerouslySetInnerHTML={{ __html: formatValue(key, value) }}
                             />
                           </div>
@@ -1059,15 +968,15 @@ export default function CoatingsPage() {
           )}
 
           {!loading && !error && hasSearched && results.length === 0 && !analyticalData && !metaQuestionData && (
-            <div className="text-center py-8 sm:py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
-              <svg className="mx-auto h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
+              <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <h3 className="text-lg sm:text-xl font-semibold text-gray-700 mb-2">No Products Found</h3>
-              <p className="text-gray-600 mb-4 text-sm sm:text-base px-4">
-                We couldn't find any coating products matching your search.
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Products Found</h3>
+              <p className="text-gray-600 mb-4">
+                We couldn&apos;t find any coating products matching your search.
               </p>
-              <p className="text-xs sm:text-sm text-gray-500 px-4">
+              <p className="text-sm text-gray-500">
                 Try adjusting your search terms or filters, or browse all products.
               </p>
             </div>
