@@ -657,10 +657,11 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		  
 		  const { data, error } = await query.limit(100)
 		  
-		  // ✅ FIXED: Use non-null assertion since we check for null/error first
-		  if (!error && data !== null && data.length > 0) {
-			console.log(`✅ Strategy 4 found ${data!.length} products with exact Product_Model match`)
-			data!.forEach((item: any) => {
+		  // ✅ FIXED: Assign to a new variable with proper type narrowing
+		  const results = data
+		  if (!error && results && results.length > 0) {
+			console.log(`✅ Strategy 4 found ${results.length} products with exact Product_Model match`)
+			results.forEach((item: any) => {
 			  const id = item.id || item.sku || JSON.stringify(item)
 			  if (!seenIds.has(id)) {
 				seenIds.add(id)
@@ -673,7 +674,7 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		}
 	  }
 	}
-	}
+}
 
 // Create comprehensive product list table
 function createProductListTable(products: ProductRecord[]): string {
