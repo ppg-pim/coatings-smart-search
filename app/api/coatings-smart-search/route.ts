@@ -630,16 +630,14 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
           console.error(`❌ Error searching ${field}:`, err)
         }
       }
-    }
-    
+    }   
     console.log(`✅ Total results: ${allResults.length}`)
-    return allResults
-    
-  } 
-  catch (error) {
-    console.error('❌ Search execution error:', error)
-    return []
-  }
+    return allResults    
+	} 
+	  catch (error) {
+		console.error('❌ Search execution error:', error)
+		return []
+	  }
   
 	// 🎯 STRATEGY 4: Exact match on Product_Model (fallback for specific model searches)
 	if (allResults.length === 0 && allColumns.includes('Product_Model')) {
@@ -659,7 +657,8 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		  
 		  const { data, error } = await query.limit(100)
 		  
-		  if (!error && data && data !== null && data.length > 0) {
+		  // ✅ FIXED: Use optional chaining - TypeScript safe!
+		  if (!error && data?.length) {
 			console.log(`✅ Strategy 4 found ${data.length} products with exact Product_Model match`)
 			data.forEach((item: any) => {
 			  const id = item.id || item.sku || JSON.stringify(item)
@@ -674,7 +673,7 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		}
 	  }
 	}
-}
+	}
 
 // Create comprehensive product list table
 function createProductListTable(products: ProductRecord[]): string {
