@@ -657,9 +657,9 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		  
 		  const { data, error } = await query.limit(100)
 		  
-		  // ✅ FIXED: Assign to a new variable with proper type narrowing
-		  const results = data
-		  if (!error && results && results.length > 0) {
+		  // ✅ FIXED: Use type assertion to tell TypeScript we know data is not null
+		  if (!error && data && data.length > 0) {
+			const results = data as any[]
 			console.log(`✅ Strategy 4 found ${results.length} products with exact Product_Model match`)
 			results.forEach((item: any) => {
 			  const id = item.id || item.sku || JSON.stringify(item)
