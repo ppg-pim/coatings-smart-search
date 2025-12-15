@@ -657,8 +657,8 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		  
 		  const { data, error } = await query.limit(100)
 		  
-		  // ✅ FIXED: Check for data AND length, then use data safely inside the block
-		  if (!error && data && data.length > 0) {
+		  // ✅ FIXED: Use type guard to satisfy TypeScript
+		  if (!error && data !== null && Array.isArray(data) && data.length > 0) {
 			console.log(`✅ Strategy 4 found ${data.length} products with exact Product_Model match`)
 			data.forEach((item: any) => {
 			  const id = item.id || item.sku || JSON.stringify(item)
