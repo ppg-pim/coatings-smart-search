@@ -346,7 +346,7 @@ function isCategoryQuery(query: string): { isCategory: boolean; categoryTerm?: s
   return { isCategory: false }
 }
 
-// 🎯 OPTIMIZED: Progressive search strategy with Product_Model support
+// 🎯 IMPROVED: Smart search with relevance scoring
 async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promise<ProductRecord[]> {
   console.log(`⚡ Executing smart search for: ${plan.searchTerms.join(', ')}`)
   
@@ -363,245 +363,204 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
   console.log(`🔍 Priority fields: ${availablePriorityFields.join(', ')}`)
   console.log(`🔍 Secondary fields: ${availableSecondaryFields.join(', ')}`)
   
-  // 🎯 NEW: Check if this is a category query
-  const categoryCheck = isCategoryQuery(plan.searchTerms.join(' '))
+  // Parse search terms
+  const searchPhrase = plan.searchTerms.join(' ')
+  const searchWords = searchPhrase.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+  
+  console.log(`🔍 Search phrase: "${searchPhrase}"`)
+  console.log(`🔍 Search words: ${searchWords.join(', ')}`)
+  
+  // Check if this is a category query
+  const categoryCheck = isCategoryQuery(searchPhrase)
   
   try {
-	// 🎯 STRATEGY 0: Category-specific search (NEW - highest priority)
-	if (categoryCheck.isCategory && categoryCheck.categoryTerm && 
-		(allColumns.includes('Product_Type') || allColumns.includes('Product_Model'))) {
-	  console.log(`🎯 CATEGORY QUERY DETECTED: "${categoryCheck.categoryTerm}"`)
-	  console.log(`🔍 Searching Product_Type AND Product_Model fields exclusively...`)
-	  
-	  try {
-		let query = supabase.from('coatings').select('*')
-		
-		// Apply user filters
-		if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
-		if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
-		if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
-		
-		// 🎯 Try both singular and plural forms
-		const singularTerm = categoryCheck.categoryTerm.replace(/s$/, '') // Remove trailing 's'
-		const pluralTerm = categoryCheck.categoryTerm.endsWith('s') 
-		  ? categoryCheck.categoryTerm 
-		  : categoryCheck.categoryTerm + 's'
-		
-		console.log(`🔍 Searching for: "${singularTerm}" OR "${pluralTerm}" in Product_Type AND Product_Model`)
-		
-		// Build OR conditions for both fields
-		const searchConditions = []
-		
-		if (allColumns.includes('Product_Type')) {
-		  searchConditions.push(`Product_Type.ilike.%${singularTerm}%`)
-		  searchConditions.push(`Product_Type.ilike.%${pluralTerm}%`)
-		}
-		
-		if (allColumns.includes('Product_Model')) {
-		  searchConditions.push(`Product_Model.ilike.%${singularTerm}%`)
-		  searchConditions.push(`Product_Model.ilike.%${pluralTerm}%`)
-		}
-		
-		// Apply OR search across both fields
-		if (searchConditions.length > 0) {
-		  query = query.or(searchConditions.join(','))
-		}
-		
-		const { data, error } = await query.limit(1000)
-		
-		console.log(`📊 Strategy 0 Results:`)
-		console.log(`  - Found: ${data?.length || 0} products`)
-		console.log(`  - Error: ${error ? error.message : 'none'}`)
-		if (data && data.length > 0) {
-		  console.log(`  - Sample results:`)
-		  data.slice(0, 5).forEach((p, i) => {
-			console.log(`    ${i + 1}. Type: "${p.Product_Type}" | Model: "${p.Product_Model}"`)
-		  })
-		}
-		
-		if (!error && data?.length) {
-		  console.log(`✅ Strategy 0 (Category) found ${data.length} products`)
-		  
-		  // 🎯 IMPORTANT: Filter out false positives
-		  // Only keep products where the category term appears in Product_Type OR Product_Model
-		  const filteredData = data.filter(item => {
-			const productType = (item.Product_Type || '').toLowerCase()
-			const productModel = (item.Product_Model || '').toLowerCase()
-			
-			const hasSingular = productType.includes(singularTerm.toLowerCase()) || 
-							   productModel.includes(singularTerm.toLowerCase())
-			const hasPlural = productType.includes(pluralTerm.toLowerCase()) || 
-							 productModel.includes(pluralTerm.toLowerCase())
-			
-			return hasSingular || hasPlural
-		  })
-		  
-		  console.log(`✅ After filtering: ${filteredData.length} products (removed ${data.length - filteredData.length} false positives)`)
-		  
-		  if (filteredData.length > 0) {
-			filteredData.forEach((item: any) => {
-			  const id = item.id || item.sku || JSON.stringify(item)
-			  if (!seenIds.has(id)) {
-				seenIds.add(id)
-				allResults.push(item)
-			  }
-			})
-			
-			// 🎯 CRITICAL: Return immediately to prevent Strategy 1 from running
-			console.log(`✅ Returning ${allResults.length} results from Strategy 0 (Category Search)`)
-			return allResults
-		  }
-		}
-		
-		console.log(`⚠️ Strategy 0 found 0 products matching category, will try other strategies...`)
-		
-	  } catch (err) {
-		console.error(`❌ Strategy 0 (Category) failed:`, err)
-	  }
-	}
-    
-	// 🎯 Check if this is a simple category-like query (single word or two words)
-	const searchTerm = plan.searchTerms.join(' ').toLowerCase()
-	const searchWords = searchTerm.split(/\s+/).filter(w => w.length > 2)
-
-	// List of common product category indicators
-	const categoryIndicators = [
-	  'primer', 'epoxy', 'polyurethane', 'urethane', 'topcoat', 'basecoat',
-	  'sealer', 'sealant', 'thinner', 'reducer', 'cleaner', 'stripper',
-	  'converter', 'activator', 'catalyst', 'acrylic', 'wash'
-	]
-
-	// If query is 1-2 words and contains a category indicator, treat as category search
-	if (searchWords.length <= 2 && searchWords.some(word => categoryIndicators.includes(word))) {
-	  console.log(`🎯 DETECTED CATEGORY-LIKE QUERY: "${searchTerm}"`)
-	  console.log(`🔍 Searching Product_Type AND Product_Model fields only...`)
-	  
-	  try {
-		let query = supabase.from('coatings').select('*')
-		
-		// Apply user filters
-		if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
-		if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
-		if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
-		
-		// Build search conditions for Product_Type and Product_Model ONLY
-		const searchConditions: string[] = []
-		
-		if (allColumns.includes('Product_Type')) {
-		  searchWords.forEach(word => {
-			searchConditions.push(`Product_Type.ilike.%${word}%`)
-		  })
-		}
-		
-		if (allColumns.includes('Product_Model')) {
-		  searchWords.forEach(word => {
-			searchConditions.push(`Product_Model.ilike.%${word}%`)
-		  })
-		}
-		
-		if (searchConditions.length > 0) {
-		  query = query.or(searchConditions.join(','))
-		}
-		
-		const { data, error } = await query.limit(1000)
-		
-		console.log(`📊 Category-like Search Results:`)
-		console.log(`  - Found: ${data?.length || 0} products`)
-		console.log(`  - Error: ${error ? error.message : 'none'}`)
-		
-		if (data && data.length > 0) {
-		  console.log(`  - Sample results:`)
-		  data.slice(0, 5).forEach((p, i) => {
-			console.log(`    ${i + 1}. Type: "${p.Product_Type}" | Model: "${p.Product_Model}"`)
-		  })
-		  
-		  // Filter to ensure the search term actually appears in Product_Type or Product_Model
-		  const filteredData = data.filter(item => {
-			const productType = (item.Product_Type || '').toLowerCase()
-			const productModel = (item.Product_Model || '').toLowerCase()
-			
-			// Check if ANY search word appears in Product_Type or Product_Model
-			return searchWords.some(word => 
-			  productType.includes(word) || productModel.includes(word)
-			)
-		  })
-		  
-		  console.log(`✅ After filtering: ${filteredData.length} products`)
-		  
-		  if (filteredData.length > 0) {
-			filteredData.forEach((item: any) => {
-			  const id = item.id || item.sku || JSON.stringify(item)
-			  if (!seenIds.has(id)) {
-				seenIds.add(id)
-				allResults.push(item)
-			  }
-			})
-			
-			console.log(`✅ Returning ${allResults.length} results from Category-like Search`)
-			return allResults
-		  }
-		}
-	  } catch (err) {
-		console.error(`❌ Category-like search failed:`, err)
-	  }
-	}
-
-    // 🎯 STRATEGY 1: Ultra-comprehensive search for list/count queries
-    if ((plan.intent === 'list' || plan.intent === 'count') && plan.searchTerms.length > 0) {
-      const searchTerm = plan.searchTerms.join(' ')
-      
-      console.log(`📊 Strategy 1: Ultra-comprehensive search for "${searchTerm}"...`)
+    // 🎯 STRATEGY 0: Category-specific search (highest priority)
+    if (categoryCheck.isCategory && categoryCheck.categoryTerm) {
+      console.log(`🎯 CATEGORY QUERY: "${categoryCheck.categoryTerm}"`)
+      console.log(`🔍 Searching Product_Type and Product_Model only...`)
       
       try {
         let query = supabase.from('coatings').select('*')
         
-        // Apply user filters first
+        // Apply filters
         if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
         if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
         if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
         
-        // 🎯 Split search term into individual words
-        const searchWords = searchTerm.split(/\s+/).filter(w => w.length > 2)
+        // Build OR conditions for Product_Type and Product_Model
+        const orConditions: string[] = []
         
-        // 🧪 DIAGNOSTIC: Check search words
-        console.log(`🧪 DIAGNOSTIC: searchWords =`, searchWords)
-        console.log(`🧪 DIAGNOSTIC: searchWords.length =`, searchWords.length)
-        console.log(`🧪 DIAGNOSTIC: Will enter Strategy 1B? ${searchWords.length > 1}`)
-
-        // Build search fields list
-        const searchFields = []
-        if (allColumns.includes('Product_Type')) searchFields.push('Product_Type')
-        if (allColumns.includes('Product_Model')) searchFields.push('Product_Model')
-        if (allColumns.includes('Product_Name')) searchFields.push('Product_Name')
-        if (allColumns.includes('family')) searchFields.push('family')
-        if (allColumns.includes('sku')) searchFields.push('sku')
-        if (allColumns.includes('Product_Description')) searchFields.push('Product_Description')
-        if (allColumns.includes('Application')) searchFields.push('Application')
+        searchWords.forEach(word => {
+          if (allColumns.includes('Product_Type')) {
+            orConditions.push(`Product_Type.ilike.%${word}%`)
+          }
+          if (allColumns.includes('Product_Model')) {
+            orConditions.push(`Product_Model.ilike.%${word}%`)
+          }
+        })
         
-        // 🎯 STRATEGY 1A: Try exact phrase match first (with timeout protection)
-        if (searchFields.length > 0) {
-          const phraseConditions = searchFields
-            .map(field => `${field}.ilike.%${searchTerm}%`)
-            .join(',')
-          
-          query = query.or(phraseConditions)
-          console.log(`🔍 Strategy 1A: Searching ${searchFields.length} fields for exact phrase: "${searchTerm}"`)
+        if (orConditions.length > 0) {
+          query = query.or(orConditions.join(','))
         }
         
         const { data, error } = await query.limit(1000)
         
-        console.log(`📊 Strategy 1A Results:`)
-        console.log(`  - Found: ${data?.length || 0} products`)
-        console.log(`  - Error: ${error ? error.message : 'none'}`)
-        if (data && data.length > 0) {
-          console.log(`  - Sample Product_Models:`, data.slice(0, 5).map(p => p.Product_Model))
-        }
+        console.log(`📊 Category search: ${data?.length || 0} products`)
         
-        if (!error && data && data.length > 0) {
-          console.log(`✅ Strategy 1A found ${data.length} products with exact phrase`)
+        if (data && data.length > 0) {
+          // Score and filter results
+          const scoredResults = data.map(item => {
+            const productType = (item.Product_Type || '').toLowerCase()
+            const productModel = (item.Product_Model || '').toLowerCase()
+            
+            let score = 0
+            
+            // Exact phrase match in Product_Type (highest priority)
+            if (productType.includes(searchPhrase.toLowerCase())) {
+              score += 100
+            }
+            
+            // Exact phrase match in Product_Model
+            if (productModel.includes(searchPhrase.toLowerCase())) {
+              score += 80
+            }
+            
+            // Individual word matches in Product_Type
+            searchWords.forEach(word => {
+              if (productType.includes(word)) score += 10
+            })
+            
+            // Individual word matches in Product_Model
+            searchWords.forEach(word => {
+              if (productModel.includes(word)) score += 5
+            })
+            
+            return { item, score }
+          })
           
-          // Deduplicate
-          data.forEach((item: any) => {
+          // Filter: Keep only items with score > 0
+          const filtered = scoredResults
+            .filter(r => r.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map(r => r.item)
+          
+          console.log(`✅ Category search found ${filtered.length} relevant products`)
+          
+          if (filtered.length > 0) {
+            filtered.forEach((item: any) => {
+              const id = item.id || item.sku || JSON.stringify(item)
+              if (!seenIds.has(id)) {
+                seenIds.add(id)
+                allResults.push(item)
+              }
+            })
+            
+            return allResults
+          }
+        }
+      } catch (err) {
+        console.error(`❌ Category search failed:`, err)
+      }
+    }
+    
+    // 🎯 STRATEGY 1: Comprehensive search with relevance scoring
+    console.log(`📊 Strategy 1: Comprehensive search with scoring...`)
+    
+    try {
+      let query = supabase.from('coatings').select('*')
+      
+      // Apply filters
+      if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
+      if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
+      if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
+      
+      // Build OR conditions across ALL searchable fields
+      const orConditions: string[] = []
+      
+      searchWords.forEach(word => {
+        // Priority fields
+        if (allColumns.includes('Product_Type')) orConditions.push(`Product_Type.ilike.%${word}%`)
+        if (allColumns.includes('Product_Model')) orConditions.push(`Product_Model.ilike.%${word}%`)
+        if (allColumns.includes('Product_Name')) orConditions.push(`Product_Name.ilike.%${word}%`)
+        if (allColumns.includes('family')) orConditions.push(`family.ilike.%${word}%`)
+        
+        // Secondary fields
+        if (allColumns.includes('Product_Description')) orConditions.push(`Product_Description.ilike.%${word}%`)
+        if (allColumns.includes('Application')) orConditions.push(`Application.ilike.%${word}%`)
+        if (allColumns.includes('Notes')) orConditions.push(`Notes.ilike.%${word}%`)
+      })
+      
+      if (orConditions.length > 0) {
+        query = query.or(orConditions.join(','))
+      }
+      
+      const { data, error } = await query.limit(1000)
+      
+      console.log(`📊 Comprehensive search: ${data?.length || 0} products`)
+      
+      if (data && data.length > 0) {
+		// 🎯 SCORE EACH RESULT
+		const scoredResults = data.map(item => {
+		  const productType = (item.Product_Type || '').toLowerCase()
+		  const productModel = (item.Product_Model || '').toLowerCase()
+		  const productName = (item.Product_Name || '').toLowerCase()
+		  const description = (item.Product_Description || '').toLowerCase()
+		  const application = (item.Application || '').toLowerCase()
+		  const notes = (item.Notes || '').toLowerCase()
+		  
+		  let score = 0
+		  
+		  // EXACT PHRASE MATCHES (highest priority)
+		  // Product_Type and Product_Model have EQUAL weight
+		  if (productType === searchPhrase.toLowerCase()) score += 1000
+		  if (productModel === searchPhrase.toLowerCase()) score += 1000
+		  if (productType.includes(searchPhrase.toLowerCase())) score += 500
+		  if (productModel.includes(searchPhrase.toLowerCase())) score += 500
+		  if (productName.includes(searchPhrase.toLowerCase())) score += 300
+		  
+		  // INDIVIDUAL WORD MATCHES IN PRIORITY FIELDS
+		  // Product_Type and Product_Model have EQUAL weight
+		  searchWords.forEach(word => {
+			if (productType.includes(word)) score += 50
+			if (productModel.includes(word)) score += 50
+			if (productName.includes(word)) score += 30
+		  })
+		  
+		  // INDIVIDUAL WORD MATCHES IN SECONDARY FIELDS
+		  searchWords.forEach(word => {
+			if (description.includes(word)) score += 5
+			if (application.includes(word)) score += 5
+			if (notes.includes(word)) score += 3
+		  })
+		  
+		  // BONUS: Multiple word matches
+		  const matchedWords = searchWords.filter(word => {
+			const allText = `${productType} ${productModel} ${productName} ${description} ${application}`.toLowerCase()
+			return allText.includes(word)
+		  })
+		  
+		  if (matchedWords.length >= 2) {
+			score += matchedWords.length * 20
+		  }
+		  
+		  return { item, score, matchedWords: matchedWords.length }
+		})
+        
+        // FILTER: Keep only relevant results
+        // For multi-word queries, require at least 2 matching words OR high score
+        const minWordsRequired = searchWords.length > 1 ? Math.min(2, searchWords.length) : 1
+        const minScoreRequired = searchWords.length > 1 ? 50 : 30
+        
+        const filtered = scoredResults
+          .filter(r => r.matchedWords >= minWordsRequired || r.score >= minScoreRequired)
+          .sort((a, b) => b.score - a.score)
+          .map(r => r.item)
+        
+        console.log(`✅ Found ${filtered.length} relevant products (filtered from ${data.length})`)
+        console.log(`📊 Top 5 scores:`, scoredResults.slice(0, 5).map(r => `${r.score} pts`))
+        
+        if (filtered.length > 0) {
+          filtered.forEach((item: any) => {
             const id = item.id || item.sku || JSON.stringify(item)
             if (!seenIds.has(id)) {
               seenIds.add(id)
@@ -611,289 +570,18 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
           
           return allResults
         }
-        
-        // 🎯 STRATEGY 1B: If phrase search failed/timed out, search for LEAST COMMON word first
-        if (searchWords.length > 1) {
-          console.log(`⚠️ Phrase search failed, trying optimized multi-word search: ${searchWords.join(' + ')}`)
-          
-          try {
-            // 🎯 STRATEGY: Search for the SECOND word first (usually less common)
-            // For "Military Thinner", search "Thinner" first to get smaller result set
-            const searchWord = searchWords[searchWords.length - 1] // Use last word (usually more specific)
-            
-            console.log(`🔍 Searching Product_Model for "${searchWord}" (more specific term)...`)
-            
-            let modelQuery = supabase.from('coatings').select('*')
-            
-            // Apply filters
-            if (appliedFilters.family) modelQuery = modelQuery.eq('family', appliedFilters.family)
-            if (appliedFilters.productType) modelQuery = modelQuery.eq('Product_Type', appliedFilters.productType)
-            if (appliedFilters.productModel) modelQuery = modelQuery.eq('Product_Model', appliedFilters.productModel)
-            
-            // Search for the more specific word
-            modelQuery = modelQuery.ilike('Product_Model', `%${searchWord}%`).limit(5000)
-            
-            const { data: modelData, error: modelError } = await modelQuery
-            
-            console.log(`📊 Product_Model search for "${searchWord}": ${modelData?.length || 0} products`)
-            console.log(`📊 Error: ${modelError ? modelError.message : 'none'}`)
-            
-            if (!modelError && modelData && modelData.length > 0) {
-              // Log sample before filtering
-              console.log(`📊 Sample products before filtering:`)
-              modelData.slice(0, 5).forEach((p, i) => {
-                console.log(`  ${i + 1}. ${p.Product_Model}`)
-              })
-              
-              // Client-side filter: Keep only products where Product_Model contains ALL words
-              const filteredProducts = modelData.filter(product => {
-                const modelValue = product.Product_Model
-                if (!modelValue) return false
-                
-                const modelLower = String(modelValue).toLowerCase()
-                
-                // Check if Product_Model contains ALL search words
-                const hasAllWords = searchWords.every(word => {
-                  const wordLower = word.toLowerCase()
-                  const hasWord = modelLower.includes(wordLower)
-                  return hasWord
-                })
-                
-                return hasAllWords
-              })
-              
-              console.log(`✅ After filtering: ${filteredProducts.length} products have ALL words in Product_Model`)
-              
-              if (filteredProducts.length > 0) {
-                console.log(`  - Matches:`)
-                filteredProducts.slice(0, 10).forEach((p, idx) => {
-                  console.log(`    ${idx + 1}. ${p.sku} - ${p.Product_Model}`)
-                })
-                
-                filteredProducts.forEach((item: any) => {
-                  const id = item.id || item.sku || JSON.stringify(item)
-                  if (!seenIds.has(id)) {
-                    seenIds.add(id)
-                    allResults.push(item)
-                  }
-                })
-                
-                console.log(`✅ Strategy 1B returning ${allResults.length} results`)
-                return allResults
-              } else {
-                console.log(`⚠️ No products matched ALL words after filtering`)
-                console.log(`🧪 DEBUG: First 3 products that didn't match:`)
-                modelData.slice(0, 3).forEach((p, i) => {
-                  console.log(`  ${i + 1}. Product_Model: "${p.Product_Model}"`)
-                  console.log(`     Checking for words: ${searchWords.join(', ')}`)
-                  searchWords.forEach(word => {
-                    const has = String(p.Product_Model || '').toLowerCase().includes(word.toLowerCase())
-                    console.log(`     - Contains "${word}": ${has}`)
-                  })
-                })
-              }
-            } else if (modelError) {
-              console.error(`❌ Product_Model search error:`, modelError)
-            }
-            
-            // If Product_Model search failed, try Product_Type with same strategy
-            console.log(`🔍 Product_Model search yielded no results, trying Product_Type for "${searchWord}"...`)
-            
-            let typeQuery = supabase.from('coatings').select('*')
-            
-            // Apply filters
-            if (appliedFilters.family) typeQuery = typeQuery.eq('family', appliedFilters.family)
-            if (appliedFilters.productType) typeQuery = typeQuery.eq('Product_Type', appliedFilters.productType)
-            if (appliedFilters.productModel) typeQuery = typeQuery.eq('Product_Model', appliedFilters.productModel)
-            
-            typeQuery = typeQuery.ilike('Product_Type', `%${searchWord}%`).limit(5000)
-            
-            const { data: typeData, error: typeError } = await typeQuery
-            
-            console.log(`📊 Product_Type search: ${typeData?.length || 0} products`)
-            
-            if (!typeError && typeData && typeData.length > 0) {
-              const filteredByType = typeData.filter(product => {
-                const typeValue = product.Product_Type
-                if (!typeValue) return false
-                
-                const typeLower = String(typeValue).toLowerCase()
-                return searchWords.every(word => typeLower.includes(word.toLowerCase()))
-              })
-              
-              console.log(`✅ After filtering Product_Type: ${filteredByType.length} products`)
-              
-              if (filteredByType.length > 0) {
-                filteredByType.forEach((item: any) => {
-                  const id = item.id || item.sku || JSON.stringify(item)
-                  if (!seenIds.has(id)) {
-                    seenIds.add(id)
-                    allResults.push(item)
-                  }
-                })
-                
-                return allResults
-              }
-            }
-            
-          } catch (err) {
-            console.error(`❌ Strategy 1B failed:`, err)
-          }
-        } else {
-          console.log(`ℹ️ Only one search word, skipping Strategy 1B`)
-        }		
-        console.log(`⚠️ Strategy 1 found 0 products, trying Strategy 2...`)
-      } catch (err) {
-        console.error(`❌ Strategy 1 failed:`, err)
-        console.error(`❌ Stack trace:`, err instanceof Error ? err.stack : 'No stack')
       }
+    } catch (err) {
+      console.error(`❌ Strategy 1 failed:`, err)
     }
     
-    // 🎯 STRATEGY 2: Search ALL priority fields (comprehensive) with AND logic
-    console.log(`📊 Strategy 2: Searching all priority fields with AND logic...`)
-
-    // Split all search terms into words
-    const allWords = plan.searchTerms.flatMap(term => 
-      term.trim().split(/\s+/).filter(w => w.length > 2)
-    )
-
-    if (allWords.length > 0) {
-      try {
-        let query = supabase.from('coatings').select('*')
-        
-        // Apply filters
-        if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
-        if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
-        if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
-        
-        // Search for first word to get base set
-        const firstWordConditions = availablePriorityFields
-          .map(field => `${field}.ilike.%${allWords[0]}%`)
-          .join(',')
-        
-        if (firstWordConditions) {
-          query = query.or(firstWordConditions)
-        }
-        
-        query = query.limit(1000)
-        
-        const { data, error } = await query
-        
-        if (!error && data && data.length > 0) {
-          console.log(`✅ Strategy 2 found ${data.length} products for first word "${allWords[0]}"`)
-          
-          // Filter to keep only products where ANY SINGLE FIELD contains ALL words
-          const filteredProducts = data.filter(product => {
-            return availablePriorityFields.some(field => {
-              const fieldValue = product[field]
-              if (!fieldValue) return false
-              
-              const fieldLower = String(fieldValue).toLowerCase()
-              
-              // Check if this field contains ALL search words
-              return allWords.every(word => fieldLower.includes(word.toLowerCase()))
-            })
-          })
-          
-          console.log(`✅ After AND filtering: ${filteredProducts.length} products contain ALL words`)
-          
-          filteredProducts.forEach((item: any) => {
-            const id = item.id || item.sku || JSON.stringify(item)
-            if (!seenIds.has(id)) {
-              seenIds.add(id)
-              allResults.push(item)
-            }
-          })
-        }
-      } catch (err) {
-        console.error(`❌ Strategy 2 failed:`, err)
-      }
-    }
-
-    // If we found results, return them
-    if (allResults.length > 0) {
-      console.log(`✅ Total results from Strategy 2: ${allResults.length}`)
-      return allResults
-    }
-    
-    // 🎯 STRATEGY 3: Try secondary fields (slower, only if needed)
-    console.log(`📊 Strategy 3: Searching secondary fields...`)
-    
-    for (const term of plan.searchTerms) {
-      const searchTerm = term.trim()
-      
-      // Try each secondary field individually to avoid timeout
-      for (const field of availableSecondaryFields) {
-        try {
-          let query = supabase.from('coatings').select('*')
-          
-          // Apply filters
-          if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
-          if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
-          if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
-          
-          query = query.ilike(field, `%${searchTerm}%`).limit(50)
-          
-          const { data, error } = await query
-          
-          if (!error && data && data.length > 0) {
-            console.log(`✅ Found ${data.length} products in ${field}`)
-            data.forEach((item: any) => {
-              const id = item.id || item.sku || JSON.stringify(item)
-              if (!seenIds.has(id)) {
-                seenIds.add(id)
-                allResults.push(item)
-              }
-            })
-          }
-        } catch (err) {
-          console.error(`❌ Error searching ${field}:`, err)
-        }
-      }
-    }
-    
-    // 🎯 STRATEGY 4: Exact match on Product_Model (fallback for specific model searches)
-    if (allResults.length === 0 && allColumns.includes('Product_Model')) {
-      console.log(`📊 Strategy 4: Trying exact Product_Model matches...`)
-      
-      for (const term of plan.searchTerms) {
-        try {
-          let query = supabase.from('coatings').select('*')
-          
-          // Apply filters
-          if (appliedFilters.family) query = query.eq('family', appliedFilters.family)
-          if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
-          if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
-          
-          // Try exact match (case-insensitive)
-          query = query.ilike('Product_Model', term)
-          
-          const { data, error } = await query.limit(100)
-          
-          // ✅ FIXED: Use optional chaining in condition, then type assertion inside
-          if (!error && data?.length) {
-            const results = data as any[]
-            console.log(`✅ Strategy 4 found ${results.length} products with exact Product_Model match`)
-            results.forEach((item: any) => {
-              const id = item.id || item.sku || JSON.stringify(item)
-              if (!seenIds.has(id)) {
-                seenIds.add(id)
-                allResults.push(item)
-              }
-            })
-          }
-        } catch (err) {
-          console.error(`❌ Strategy 4 failed:`, err)
-        }
-      }
-    }
+    console.log(`⚠️ No results found`)
+    return []
     
   } catch (error) {
-    console.error('❌ Search execution error:', error)
+    console.error('❌ Search failed:', error)
+    return []
   }
-  
-  console.log(`✅ Total results: ${allResults.length}`)
-  return allResults
 }
 
 // Create comprehensive product list table
