@@ -485,7 +485,7 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
 		if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
 		
 		// Build search conditions for Product_Type and Product_Model ONLY
-		const searchConditions = []
+		const searchConditions: string[] = []
 		
 		if (allColumns.includes('Product_Type')) {
 		  searchWords.forEach(word => {
