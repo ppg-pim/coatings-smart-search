@@ -7,7 +7,7 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const openaiApiKey = process.env.OPENAI_API_KEY!
 
 const supabase = createClient(supabaseUrl, supabaseKey)
-const openai = new OpenAI({ apiKey: openaiApiKey })
+const openai = new OpenAI({ apiKey: openaiApiKey }) 
 
 // ============================================================================
 // TYPES & CONSTANTS
@@ -320,20 +320,30 @@ async function executeSemanticSearch(
     }
 
     // Use Supabase RPC function for vector similarity search
-    let query = supabase.rpc('match_coatings', {
+    const { data, error } = await supabase.rpc('match_coatings', {
       query_embedding: queryEmbedding,
       match_threshold: SEMANTIC_SIMILARITY_THRESHOLD,
       match_count: limit
     })
 
-    const { data, error } = await query
-
     if (error) {
       console.error('❌ Semantic search error:', error)
+      console.error('❌ Error details:', JSON.stringify(error, null, 2))
       return []
     }
 
-    console.log(`✅ Semantic search found ${data?.length || 0} products`)
+    if (!data || data.length === 0) {
+      console.log('⚠️ Semantic search returned 0 results')
+      console.log('   Possible reasons:')
+      console.log('   1. No embeddings in database (all NULL)')
+      console.log('   2. Similarity threshold too high (current: ' + SEMANTIC_SIMILARITY_THRESHOLD + ')')
+      console.log('   3. Query embedding doesn\'t match any products closely')
+      return []
+    }
+
+    console.log(`✅ Semantic search found ${data.length} products`)
+    console.log(`   Top 3 similarities: ${data.slice(0, 3).map((d: any) => d.similarity?.toFixed(3)).join(', ')}`)
+    
     return data || []
 
   } catch (error) {
@@ -346,7 +356,6 @@ async function executeSemanticSearch(
 // AI QUERY PLANNING
 // ============================================================================
 
-// AI Query Planner (shortened prompt)
 async function planQuery(userQuery: string, appliedFilters: any): Promise<AIQueryPlan> {
   console.log(`🤖 AI analyzing query: "${userQuery}"`)
 
