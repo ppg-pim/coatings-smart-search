@@ -7,6 +7,8 @@ export default function CoatingsPage() {
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [aiAnswer, setAiAnswer] = useState<string>('')
+  const [searchIntent, setSearchIntent] = useState<string>('')
   const [specificAnswer, setSpecificAnswer] = useState<any>(null)
   const [comparisonData, setComparisonData] = useState<any>(null)
   const [analyticalData, setAnalyticalData] = useState<any>(null)
@@ -47,13 +49,11 @@ export default function CoatingsPage() {
     // 1. Handle markdown tables FIRST (before other replacements)
     const tablePattern = /\n\|(.+)\|\n\|[\-:\s|]+\|\n((?:\|.+\|\n?)+)/g;
     html = html.replace(tablePattern, (match, header, rows) => {
-      // Split header and filter out empty cells
       const headerCells = header
         .split('|')
         .map((cell: string) => cell.trim())
         .filter((cell: string) => cell !== '' && cell !== '-');
       
-      // Process each row
       const bodyRowsArray = rows.trim().split('\n').map((row: string) => {
         const cells = row
           .split('|')
@@ -62,7 +62,6 @@ export default function CoatingsPage() {
         return cells;
       });
       
-      // Generate table HTML
       const headerHTML = headerCells
         .map((cell: string) => 
           `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell}</th>`
@@ -111,7 +110,6 @@ export default function CoatingsPage() {
       // Skip if this line is part of a table (already processed)
       if (trimmedLine.startsWith('<div class="overflow-x-auto') || trimmedLine.startsWith('<table') || trimmedLine.includes('</table>')) {
         if (inList) {
-          // Close any open list before the table
           processedLines.push(
             '<ul class="space-y-2 my-4 pl-0">' +
             listItems.map(item => 
@@ -132,12 +130,9 @@ export default function CoatingsPage() {
           inList = true;
           listItems = [];
         }
-        // Remove the dash and add to list items
         listItems.push(trimmedLine.substring(2).trim());
       } else {
-        // Not a list item - close any open list
         if (inList) {
-          // Output the accumulated list
           processedLines.push(
             '<ul class="space-y-2 my-4 pl-0">' +
             listItems.map(item => 
@@ -149,7 +144,6 @@ export default function CoatingsPage() {
           listItems = [];
         }
         
-        // Add the non-list line
         if (trimmedLine && !trimmedLine.startsWith('<')) {
           processedLines.push(`<p class="my-3 leading-relaxed">${line}</p>`);
         } else if (trimmedLine.startsWith('<')) {
@@ -216,87 +210,66 @@ export default function CoatingsPage() {
     }
   }
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSearch = async () => {
+    if (!query.trim()) {
+      setError('Please enter a search query')
+      return
+    }
+
     setLoading(true)
     setError('')
     setResults([])
+    setAiAnswer('')
+    setSearchIntent('')
     setSpecificAnswer(null)
     setComparisonData(null)
     setAnalyticalData(null)
     setMetaQuestionData(null)
     setHasSearched(true)
-    setSearchProgress('Analyzing your query...')
-    setSearchTime(null)
-
+    setSearchProgress('Analyzing query...')
+    
     const startTime = Date.now()
 
     try {
-      setSearchProgress('Searching database...')
-      
       const response = await fetch('/api/coatings-smart-search', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          query,
-          family: selectedFamily,
-          productType: selectedProductType,
-          productModel: selectedProductModel
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query.trim(),
+          filters: {
+            family: selectedFamily,
+            productType: selectedProductType,
+            productModel: selectedProductModel
+          }
+        })
       })
 
       const data = await response.json()
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-      setSearchTime(parseFloat(elapsed))
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Search failed')
-      }
+      // 🔍 DEBUG - Remove after testing
+      console.log('🔍 Full Response:', data)
+      console.log('✨ AI Answer exists?', !!data.answer)
+      console.log('✨ AI Answer length:', data.answer?.length)
+      console.log('✨ AI Answer preview:', data.answer?.substring(0, 200))
 
-      setSearchProgress('Processing results...')
-
-      if (data.questionType === 'meta') {
-        console.log('🎯 Meta-question detected:', data.metaType)
-        setMetaQuestionData(data)
-        setSearchProgress(`Meta-question answered in ${elapsed}s`)
+      if (data.success) {
+        setResults(data.products || [])
+        setAiAnswer(data.answer || '')
+        setSearchIntent(data.intent || '')
         
-        if (data.metaType === 'count' && data.filter && data.count > 0) {
-          console.log('🔍 Fetching products for filtered count...')
-          await fetchFilteredProducts(data.filter)
-        }
+        const endTime = Date.now()
+        setSearchTime((endTime - startTime) / 1000)
         
-        setLoading(false)
-        return
-      }
-
-      if (data.questionType === 'analytical') {
-        setAnalyticalData(data)
-        setResults(data.products || [])
-      }
-      else if (data.questionType === 'comparison') {
-        setComparisonData(data)
-        setResults(data.products || [])
-      }
-      else if (data.questionType === 'specific') {
-        setSpecificAnswer(data)
-        if (data.fullProduct) {
-          setResults([data.fullProduct])
-        }
-      }
-      else {
-        setResults(data.products || [])
-        if (data.summary) {
-          setSpecificAnswer({
-            summary: data.summary,
-            count: data.count || 0,
-            totalFound: data.totalFound || 0
-          })
-        }
+        console.log('✅ Search completed')
+        console.log('📊 Products:', data.products?.length)
+        console.log('✨ AI Answer:', data.answer?.substring(0, 100) + '...')
+        console.log('🎯 Intent:', data.intent)
+      } else {
+        setError(data.error || 'Search failed')
       }
     } catch (err: any) {
-      setError(err.message)
+      console.error('Search error:', err)
+      setError(err.message || 'An error occurred')
     } finally {
       setLoading(false)
       setSearchProgress('')
@@ -447,6 +420,77 @@ export default function CoatingsPage() {
     }
   }
 
+  // 🎯 NEW: Render AI Summary (Primary Display)
+  const renderAISummary = () => {
+    if (!aiAnswer || comparisonData || analyticalData || metaQuestionData) return null
+
+    return (
+      <div className="mb-8 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-lg overflow-hidden border border-indigo-100">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <span className="text-3xl">✨</span>
+              <div>
+                <h3 className="text-xl font-bold text-white">
+                  AI Summary
+                </h3>
+                <p className="text-indigo-100 text-sm">
+                  {searchIntent === 'comparison' && 'Product Comparison'}
+                  {searchIntent === 'lookup' && 'Product Information'}
+                  {searchIntent === 'list' && 'Product Catalog'}
+                  {searchIntent === 'count' && 'Product Count'}
+                  {searchIntent === 'analytical' && 'Expert Recommendation'}
+                  {!searchIntent && 'Search Results'}
+                </p>
+              </div>
+            </div>
+            
+            {/* Search Stats */}
+            <div className="text-right">
+              <div className="text-white text-sm font-semibold">
+                {results.length} Products Found
+              </div>
+              {searchTime && (
+                <div className="text-indigo-200 text-xs">
+                  {searchTime.toFixed(1)}s response time
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* AI Answer Content */}
+        <div className="px-6 py-6">
+          <div 
+            className="prose prose-indigo max-w-none"
+            dangerouslySetInnerHTML={{ 
+              __html: renderMarkdown(aiAnswer, 'indigo') 
+            }}
+          />
+        </div>
+
+        {/* Footer */}
+        <div className="bg-indigo-50 px-6 py-3 border-t border-indigo-100">
+          <div className="flex items-center justify-between text-sm text-indigo-700">
+            <div className="flex items-center space-x-2">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <span>AI-generated summary based on {results.length} matching products</span>
+            </div>
+            <button
+              onClick={scrollToProducts}
+              className="text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              View Products →
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderAnalyticalSummary = () => {
     if (!analyticalData) return null
 
@@ -461,7 +505,7 @@ export default function CoatingsPage() {
                 </svg>
               </div>
               <div className="ml-3 sm:ml-4 flex-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
+                <h2 className="text-xl sm:text-2xl font-bold text-green-900 mb-2">AI Summary</h2>
                 <p className="text-green-700 text-xs sm:text-sm">
                   Based on analysis of {analyticalData.count} coating product(s)
                   {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
@@ -794,7 +838,7 @@ export default function CoatingsPage() {
           Search coating products using natural language • Powered by AI
         </p>
 
-        <form onSubmit={handleSearch}>
+        <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }}>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 mb-4">
             <input
               type="text"
@@ -985,6 +1029,10 @@ export default function CoatingsPage() {
 
       {!loading && !error && hasSearched && (
         <>
+          {/* 🎯 NEW: AI Summary Display (Shows FIRST) */}
+          {renderAISummary()}
+          
+          {/* Existing summary renderers */}
           {renderMetaSummary()}
           {renderAnalyticalSummary()}
           {renderLookupSummary()}
@@ -994,12 +1042,12 @@ export default function CoatingsPage() {
             <div id="product-references" className="bg-white rounded-lg shadow-sm p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 gap-3">
                 <h2 className="text-xl sm:text-2xl font-bold" style={{ color: '#0078a9' }}>
-                  {analyticalData || metaQuestionData ? 'Product References' : 'Search Results'}
+                  {analyticalData || metaQuestionData || aiAnswer ? 'Product References' : 'Search Results'}
                 </h2>
                 <div className="flex items-center gap-3 sm:gap-4">
                   {searchTime && (
                     <span className="text-xs sm:text-sm text-gray-500">
-                      ⚡ {searchTime}s
+                      ⚡ {searchTime.toFixed(1)}s
                     </span>
                   )}
                   <span className="px-3 sm:px-4 py-1 sm:py-2 bg-blue-100 text-blue-800 rounded-full text-xs sm:text-sm font-semibold">
@@ -1058,7 +1106,7 @@ export default function CoatingsPage() {
             </div>
           )}
 
-          {!loading && !error && hasSearched && results.length === 0 && !analyticalData && !metaQuestionData && (
+          {!loading && !error && hasSearched && results.length === 0 && !analyticalData && !metaQuestionData && !aiAnswer && (
             <div className="text-center py-8 sm:py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
               <svg className="mx-auto h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
