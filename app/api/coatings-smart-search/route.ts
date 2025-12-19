@@ -27,6 +27,15 @@ interface AIQueryPlan {
   explanation: string
 }
 
+interface EnhancedQuery {
+  originalQuery: string
+  enhancedQuery: string
+  searchIntent: string
+  domainTerms: string[]
+  technicalRequirements: string[]
+  expectedProductTypes: string[]
+}
+
 interface FilterCache {
   families: string[]
   productTypes: string[]
@@ -52,15 +61,19 @@ const MAX_FIELD_LENGTH = 200
 
 // 🎯 Semantic Search Configuration
 const EMBEDDING_MODEL = 'text-embedding-3-small'
-const SEMANTIC_SIMILARITY_THRESHOLD = 0.50
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.45 // Lowered from 0.50
 const SEMANTIC_SEARCH_LIMIT = 100
 
 // 🎯 Cache for database schema
 let schemaCache: string[] | null = null
 
-// In-memory cache
+// In-memory caches
 let filterCache: FilterCache | null = null
 const CACHE_TTL = 1000 * 60 * 60 * 24
+
+// 🆕 Query enhancement cache
+const queryEnhancementCache = new Map<string, EnhancedQuery>()
+const QUERY_CACHE_TTL = 1000 * 60 * 60 // 1 hour
 
 // ============================================================================
 // DATABASE UTILITIES
@@ -262,6 +275,104 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
 }
 
 // ============================================================================
+// 🆕 AI-POWERED QUERY ENHANCEMENT
+// ============================================================================
+
+async function enhanceQueryWithAI(userQuery: string): Promise<EnhancedQuery> {
+  // Check cache first
+  const cacheKey = userQuery.toLowerCase().trim()
+  const cached = queryEnhancementCache.get(cacheKey)
+  
+  if (cached) {
+    console.log(`✅ Using cached query enhancement`)
+    return cached
+  }
+
+  console.log(`🧠 AI enhancing query: "${userQuery}"`)
+
+  const systemPrompt = `You are a coating/sealant product domain expert. Analyze the user's query and enhance it for better product search.
+
+Return JSON with:
+{
+  "originalQuery": "user's original query",
+  "enhancedQuery": "expanded query with technical terms and synonyms (max 150 words)",
+  "searchIntent": "what the user is really looking for",
+  "domainTerms": ["5-10 technical terms related to the query"],
+  "technicalRequirements": ["specific product requirements"],
+  "expectedProductTypes": ["types of products that would match"]
+}
+
+DOMAIN KNOWLEDGE FOR COATINGS:
+- Corrosion prevention → corrosion resistant, anti-corrosion, rust inhibitor, zinc-rich primer, epoxy coating, chemical resistant, protective coating, metal protection
+- Fuel tank → fuel resistant, aviation fuel, chemical resistant, tank lining, polysulfide sealant
+- Exterior → weathering resistant, UV resistant, outdoor, environmental exposure, topcoat
+- Flexible → elastomeric, pliable, movement accommodation, resilient
+- High temperature → heat resistant, thermal stability, fire resistant
+- Adhesion → bonding, substrate adhesion, primer, surface preparation
+- Sealing → gap filling, air sealing, moisture barrier, waterproof
+- Primer → base coat, undercoat, surface preparation, adhesion promoter
+- Topcoat → finish coat, protective layer, final coating
+- Conductive → EMI shielding, static dissipative, electrical conductivity
+
+EXAMPLES:
+Query: "best coating for corrosion prevention"
+→ Enhanced: "corrosion resistant coating anti-corrosion rust prevention epoxy primer polyurethane topcoat chemical resistant protective coating metal protection zinc-rich primer corrosion inhibitor"
+→ Domain terms: ["corrosion resistant", "anti-corrosion", "rust prevention", "protective coating", "epoxy primer"]
+→ Expected types: ["Epoxy Primer", "Corrosion Inhibitive Primer", "Polyurethane Topcoat", "Zinc-Rich Primer", "Protective Coating"]
+
+Query: "flexible sealant for fuel tanks"
+→ Enhanced: "flexible elastomeric sealant fuel resistant aviation fuel chemical resistant tank sealant polysulfide fuel system sealing compound"
+→ Domain terms: ["fuel resistant", "elastomeric", "chemical resistant", "aviation fuel", "polysulfide"]
+→ Expected types: ["Polysulfide Sealant", "Fuel Tank Sealant", "Chemical Resistant Sealant", "Elastomeric Sealant"]
+
+Query: "thinner"
+→ Enhanced: "thinner reducer solvent cleaning agent dilution coating thinner paint thinner"
+→ Domain terms: ["thinner", "reducer", "solvent", "dilution"]
+→ Expected types: ["Thinner", "Reducer", "Solvent", "Cleaning Agent"]`
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini', // Faster and cheaper
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Enhance this query for coating product search: "${userQuery}"` }
+      ],
+      temperature: 0.3,
+      response_format: { type: 'json_object' }
+    })
+
+    const enhanced = JSON.parse(completion.choices[0].message.content || '{}') as EnhancedQuery
+
+    console.log(`✅ Query enhanced:`)
+    console.log(`   Original: "${enhanced.originalQuery}"`)
+    console.log(`   Enhanced: "${enhanced.enhancedQuery?.substring(0, 100)}..."`)
+    console.log(`   Intent: ${enhanced.searchIntent}`)
+    console.log(`   Domain terms: ${enhanced.domainTerms?.slice(0, 5).join(', ')}...`)
+    console.log(`   Expected types: ${enhanced.expectedProductTypes?.slice(0, 3).join(', ')}...`)
+
+    // Cache the result
+    queryEnhancementCache.set(cacheKey, enhanced)
+    
+    // Auto-cleanup old cache entries
+    setTimeout(() => {
+      queryEnhancementCache.delete(cacheKey)
+    }, QUERY_CACHE_TTL)
+
+    return enhanced
+  } catch (error) {
+    console.error('❌ Query enhancement failed:', error)
+    return {
+      originalQuery: userQuery,
+      enhancedQuery: userQuery,
+      searchIntent: 'lookup',
+      domainTerms: [],
+      technicalRequirements: [],
+      expectedProductTypes: []
+    }
+  }
+}
+
+// ============================================================================
 // SEMANTIC SEARCH
 // ============================================================================
 
@@ -285,12 +396,17 @@ async function generateEmbedding(text: string): Promise<number[]> {
 async function executeSemanticSearch(
   queryText: string,
   appliedFilters: any,
+  enhancedQuery: EnhancedQuery | null = null,
   limit: number = SEMANTIC_SEARCH_LIMIT
 ): Promise<ProductRecord[]> {
   console.log(`🧠 Executing semantic search for: "${queryText}"`)
 
   try {
-    const queryEmbedding = await generateEmbedding(queryText)
+    // 🎯 Use enhanced query if available
+    const searchText = enhancedQuery?.enhancedQuery || queryText
+    console.log(`📝 Using ${enhancedQuery ? 'enhanced' : 'original'} query for embedding`)
+
+    const queryEmbedding = await generateEmbedding(searchText)
 
     if (queryEmbedding.length === 0) {
       console.log('⚠️ Semantic search failed, no embedding generated')
@@ -305,35 +421,20 @@ async function executeSemanticSearch(
       return []
     }
 
-    const thresholds = [0.50, 0.40, 0.30, 0.20]
+    // 🎯 Lower thresholds for better recall
+    const thresholds = [0.45, 0.35, 0.25, 0.20]
 
     for (const threshold of thresholds) {
       console.log(`🔍 Trying semantic search with threshold: ${threshold}`)
 
       try {
         const embeddingString = `[${queryEmbedding.join(',')}]`
-        
-        console.log(`   📊 Embedding format: string with ${queryEmbedding.length} values`)
 
         const { data, error } = await supabase.rpc('match_coatings', {
           query_embedding: embeddingString,
           match_threshold: threshold,
           match_count: limit
         })
-
-        // 🎯 Debug logging
-        console.log(`   🔍 RPC Response:`)
-        console.log(`      - data type: ${Array.isArray(data) ? 'array' : typeof data}`)
-        console.log(`      - data length: ${data?.length || 0}`)
-        console.log(`      - error: ${error ? JSON.stringify(error) : 'none'}`)
-
-        if (data && data.length > 0) {
-          console.log(`      - first result:`, {
-            sku: data[0].sku,
-            type: data[0].Product_Type,
-            similarity: data[0].similarity
-          })
-        }
 
         if (error) {
           console.error(`❌ Semantic search error at threshold ${threshold}:`, error)
@@ -354,10 +455,54 @@ async function executeSemanticSearch(
         console.log(`✅ Semantic search found ${data.length} products at threshold ${threshold}`)
         console.log(`   Top 5 similarities:`, data.slice(0, 5).map((d: any) => 
           `${d.similarity?.toFixed(3)} - ${d.Product_Type || 'N/A'}`
-        ).join(', '))
+        ).join(', ')
+        )
 
         let filtered = data
 
+        // 🎯 NEW: Re-rank results based on expected product types
+        if (enhancedQuery?.expectedProductTypes && enhancedQuery.expectedProductTypes.length > 0) {
+          filtered = filtered.map((product: any) => {
+            const productType = (product.Product_Type || '').toLowerCase()
+            const productName = (product.Product_Name || '').toLowerCase()
+            const description = (product.Product_Description || '').toLowerCase()
+            
+            let typeBoost = 0
+            
+            // Boost for expected product types
+            enhancedQuery.expectedProductTypes.forEach(expectedType => {
+              const lowerExpected = expectedType.toLowerCase()
+              if (productType.includes(lowerExpected) || lowerExpected.includes(productType)) {
+                typeBoost += 0.15 // Boost similarity by 15%
+              }
+              if (productName.includes(lowerExpected)) {
+                typeBoost += 0.10 // Boost similarity by 10%
+              }
+            })
+
+            // Boost for domain terms in description
+            enhancedQuery.domainTerms?.forEach(term => {
+              const lowerTerm = term.toLowerCase()
+              if (description.includes(lowerTerm)) {
+                typeBoost += 0.05 // Boost similarity by 5%
+              }
+            })
+
+            return {
+              ...product,
+              similarity: Math.min(1.0, (product.similarity || 0) + typeBoost),
+              _boosted: typeBoost > 0,
+              _boostAmount: typeBoost
+            }
+          }).sort((a: any, b: any) => (b.similarity || 0) - (a.similarity || 0))
+
+          console.log(`   🎯 Re-ranked with AI boost`)
+          console.log(`   Top 5 after boost:`, filtered.slice(0, 5).map((d: any) => 
+            `${d.similarity?.toFixed(3)} - ${d.Product_Type}${d._boosted ? ` ⭐+${(d._boostAmount * 100).toFixed(0)}%` : ''}`
+          ).join(', '))
+        }
+
+        // Apply user filters
         if (appliedFilters.family) {
           const beforeCount = filtered.length
           filtered = filtered.filter((p: any) => p.family === appliedFilters.family)
@@ -378,6 +523,13 @@ async function executeSemanticSearch(
 
         if (filtered.length > 0) {
           console.log(`✅ Returning ${filtered.length} filtered results`)
+          
+          // 🎯 Attach enhanced query metadata for answer generation
+          filtered.forEach((product: any) => {
+            product._enhancedQuery = enhancedQuery
+            product._source = 'semantic'
+          })
+          
           return filtered
         }
 
@@ -483,7 +635,11 @@ function analyzeQuery(searchPhrase: string, searchWords: string[]): QueryAnalysi
   }
 }
 
-async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promise<ProductRecord[]> {
+async function executeSmartSearch(
+  plan: AIQueryPlan, 
+  appliedFilters: any,
+  enhancedQuery: EnhancedQuery | null = null
+): Promise<ProductRecord[]> {
   console.log(`⚡ Executing smart search for: ${plan.searchTerms.join(', ')}`)
 
   const allResults: ProductRecord[] = []
@@ -530,7 +686,7 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
             const id = item.sku || JSON.stringify(item)
             if (!seenIds.has(id)) {
               seenIds.add(id)
-              allResults.push(item)
+              allResults.push({ ...item, _source: 'sku', _score: 1000 })
             }
           })
         }
@@ -540,50 +696,46 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
     }
 
     if (allResults.length > 0) {
-      console.log(`✅ Returning ${allResults.length} exact SKU match(es)`)
+      console.log(`✅ Returning ${allResults.length} SKU matches`)
       return allResults
     }
   }
 
   // ============================================================================
-  // 🎯 STRATEGY 1: SEMANTIC SEARCH
+  // 🎯 STRATEGY 1: SEMANTIC SEARCH (with AI enhancement)
   // ============================================================================
+
+  console.log(`\n🧠 STRATEGY 1: Semantic Search (${queryAnalysis.searchStrategy})...`)
   
-  if (queryAnalysis.searchStrategy === 'semantic-first' || queryAnalysis.searchStrategy === 'hybrid') {
-    console.log(`\n🧠 STRATEGY 1: Semantic Search (${queryAnalysis.searchStrategy})...`)
-    
-    if (allColumns.includes('embedding')) {
-      try {
-        const semanticResults = await executeSemanticSearch(searchPhrase, appliedFilters, 100)
+  try {
+    const semanticResults = await executeSemanticSearch(
+      searchPhrase,
+      appliedFilters,
+      enhancedQuery,
+      SEMANTIC_SEARCH_LIMIT
+    )
 
-        if (semanticResults.length > 0) {
-          console.log(`✅ Semantic search found ${semanticResults.length} products`)
-          
-          semanticResults.forEach((item: any) => {
-            const id = item.sku || JSON.stringify(item)
-            if (!seenIds.has(id)) {
-              seenIds.add(id)
-              allResults.push({ ...item, _source: 'semantic' })
-            }
-          })
-
-          if (queryAnalysis.searchStrategy === 'semantic-first' && allResults.length >= 10) {
-            console.log(`✅ Returning ${allResults.length} semantic search results`)
-            return allResults
-          }
+    if (semanticResults.length > 0) {
+      console.log(`✅ Semantic search found ${semanticResults.length} products`)
+      
+      semanticResults.forEach((item: any) => {
+        const id = item.sku || JSON.stringify(item)
+        if (!seenIds.has(id)) {
+          seenIds.add(id)
+          allResults.push(item)
         }
-      } catch (err) {
-        console.error(`❌ Semantic search failed:`, err)
-      }
+      })
     } else {
-      console.log(`⚠️ Semantic search unavailable (no embedding column)`)
+      console.log(`⚠️ Semantic search returned 0 results`)
     }
+  } catch (err) {
+    console.error(`❌ Semantic search failed:`, err)
   }
 
   // ============================================================================
-  // 🎯 STRATEGY 2: SMART KEYWORD SEARCH
+  // 🎯 STRATEGY 2: SMART KEYWORD SEARCH (with AI-enhanced terms)
   // ============================================================================
-  
+
   console.log(`\n🔍 STRATEGY 2: Smart Keyword Search...`)
 
   try {
@@ -593,30 +745,23 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
     if (appliedFilters.productType) query = query.eq('Product_Type', appliedFilters.productType)
     if (appliedFilters.productModel) query = query.eq('Product_Model', appliedFilters.productModel)
 
+    // 🎯 Use enhanced domain terms if available
+    const searchTermsToUse = enhancedQuery?.domainTerms?.length 
+      ? [...searchWords, ...enhancedQuery.domainTerms.map(t => t.toLowerCase())]
+      : searchWords
+
+    const uniqueTerms = [...new Set(searchTermsToUse)].slice(0, 15) // Limit to prevent query overload
+
     const orConditions: string[] = []
 
-    if (queryAnalysis.isSingleWord) {
-      const word = searchWords[0]
-      if (allColumns.includes('Product_Type')) orConditions.push(`Product_Type.ilike.%${word}%`)
-      if (allColumns.includes('Product_Model')) orConditions.push(`Product_Model.ilike.%${word}%`)
-      if (allColumns.includes('Product_Name')) orConditions.push(`Product_Name.ilike.%${word}%`)
-      if (allColumns.includes('Product_Description')) orConditions.push(`Product_Description.ilike.%${word}%`)
-    } else {
-      if (allColumns.includes('Product_Type')) {
-        orConditions.push(`Product_Type.ilike.%${searchPhrase}%`)
-      }
-      if (allColumns.includes('Product_Model')) {
-        orConditions.push(`Product_Model.ilike.%${searchPhrase}%`)
-      }
-      if (allColumns.includes('Product_Name')) {
-        orConditions.push(`Product_Name.ilike.%${searchPhrase}%`)
-      }
-
-      searchWords.forEach(word => {
-        if (allColumns.includes('Product_Type')) orConditions.push(`Product_Type.ilike.%${word}%`)
-        if (allColumns.includes('Product_Model')) orConditions.push(`Product_Model.ilike.%${word}%`)
-      })
-    }
+    uniqueTerms.forEach(term => {
+      if (allColumns.includes('Product_Type')) orConditions.push(`Product_Type.ilike.%${term}%`)
+      if (allColumns.includes('Product_Model')) orConditions.push(`Product_Model.ilike.%${term}%`)
+      if (allColumns.includes('Product_Name')) orConditions.push(`Product_Name.ilike.%${term}%`)
+      if (allColumns.includes('Product_Description')) orConditions.push(`Product_Description.ilike.%${term}%`)
+      if (allColumns.includes('Application')) orConditions.push(`Application.ilike.%${term}%`)
+      if (allColumns.includes('Features')) orConditions.push(`Features.ilike.%${term}%`)
+    })
 
     if (orConditions.length > 0) {
       query = query.or(orConditions.join(','))
@@ -632,10 +777,38 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
         const productModel = (item.Product_Model || '').toLowerCase()
         const productName = (item.Product_Name || '').toLowerCase()
         const description = (item.Product_Description || '').toLowerCase()
+        const application = (item.Application || '').toLowerCase()
+        const features = (item.Features || '').toLowerCase()
 
         let score = 0
         const exactPhrase = searchPhrase.toLowerCase()
 
+        // 🎯 Bonus for enhanced domain terms
+        if (enhancedQuery?.domainTerms) {
+          enhancedQuery.domainTerms.forEach(term => {
+            const lowerTerm = term.toLowerCase()
+            if (productType.includes(lowerTerm)) score += 150
+            if (productName.includes(lowerTerm)) score += 100
+            if (description.includes(lowerTerm)) score += 80
+            if (application.includes(lowerTerm)) score += 80
+            if (features.includes(lowerTerm)) score += 60
+          })
+        }
+
+        // 🎯 Bonus for expected product types
+        if (enhancedQuery?.expectedProductTypes) {
+          enhancedQuery.expectedProductTypes.forEach(expectedType => {
+            const lowerExpected = expectedType.toLowerCase()
+            if (productType.includes(lowerExpected) || lowerExpected.includes(productType)) {
+              score += 200
+            }
+            if (productName.includes(lowerExpected)) {
+              score += 150
+            }
+          })
+        }
+
+        // Exact phrase matches
         if (productType === exactPhrase) score += 1000
         else if (productType.includes(exactPhrase)) score += 500
 
@@ -645,13 +818,17 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
         if (productName === exactPhrase) score += 600
         else if (productName.includes(exactPhrase)) score += 300
 
+        // Match original search words
         const matchedWords = searchWords.filter(word =>
           productType.includes(word) || 
           productModel.includes(word) ||
           productName.includes(word) ||
-          description.includes(word)
+          description.includes(word) ||
+          application.includes(word) ||
+          features.includes(word)
         )
 
+        // 🎯 More lenient scoring
         if (queryAnalysis.isSingleWord) {
           if (matchedWords.length === 0) return { item, score: 0 }
           
@@ -660,38 +837,35 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
             if (productModel.includes(word)) score += 40
             if (productName.includes(word)) score += 30
             if (description.includes(word)) score += 10
+            if (application.includes(word)) score += 20
           })
-        } else if (queryAnalysis.requiresAllWords) {
-          if (matchedWords.length < searchWords.length) {
-            return { item, score: 0 }
-          }
-
-          score += matchedWords.length * 50
-
-          const allText = `${productType} ${productModel} ${productName}`
-          if (allText.includes(exactPhrase)) {
-            score += 200
-          }
         } else {
-          const minRequired = Math.max(2, Math.floor(searchWords.length * 0.6))
+          // 🎯 Require only 40% word match (was 60%)
+          const minRequired = Math.max(1, Math.floor(searchWords.length * 0.4))
           if (matchedWords.length < minRequired) {
             return { item, score: 0 }
           }
 
           score += matchedWords.length * 30
+
+          const allText = `${productType} ${productModel} ${productName} ${description} ${application}`
+          if (allText.includes(exactPhrase)) {
+            score += 200
+          }
         }
 
         return { item, score, matchedWords: matchedWords.length }
       })
 
-      const minScore = queryAnalysis.isSingleWord ? 30 : 100
+      // 🎯 Lower minimum score threshold
+      const minScore = queryAnalysis.isSingleWord ? 20 : 50
       const maxResults = queryAnalysis.isSingleWord ? 100 : 50
 
       const filtered = scoredResults
         .filter(r => r.score >= minScore)
         .sort((a, b) => b.score - a.score)
         .slice(0, maxResults)
-        .map(r => ({ ...r.item, _source: 'keyword' }))
+        .map(r => ({ ...r.item, _source: 'keyword', _score: r.score }))
 
       console.log(`✅ Keyword search: ${filtered.length} relevant products (from ${data.length} raw)`)
       console.log(`📊 Top 5 scores:`, scoredResults
@@ -708,90 +882,128 @@ async function executeSmartSearch(plan: AIQueryPlan, appliedFilters: any): Promi
           allResults.push(item)
         }
       })
-
-      if (allResults.length > 0) {
-        console.log(`✅ Returning ${allResults.length} total results (semantic + keyword)`)
-        return allResults
-      }
     }
   } catch (err) {
     console.error(`❌ Keyword search failed:`, err)
   }
 
-  console.log(`⚠️ No results found`)
-  return []
+  console.log(`✅ Returning ${allResults.length} total results (semantic + keyword)`)
+  return allResults
 }
 
 // ============================================================================
-// FORMATTING UTILITIES
+// ANSWER GENERATION
 // ============================================================================
 
-async function prepareEssentialProductData(
+function prepareEssentialProductData(products: ProductRecord[], maxProducts: number = MAX_DETAILED_PRODUCTS): string {
+  const limitedProducts = products.slice(0, maxProducts)
+  
+  const essentialData = limitedProducts.map((p, idx) => {
+    const essential: any = {
+      index: idx + 1,
+      sku: p.sku || 'N/A',
+      type: p.Product_Type || 'N/A',
+      name: p.Product_Name || 'N/A',
+      model: p.Product_Model || 'N/A',
+    }
+
+    // Include key fields if they exist
+    if (p.Product_Description) {
+      essential.description = String(p.Product_Description).substring(0, MAX_FIELD_LENGTH)
+    }
+    if (p.Application) {
+      essential.application = String(p.Application).substring(0, MAX_FIELD_LENGTH)
+    }
+    if (p.Features) {
+      essential.features = String(p.Features).substring(0, MAX_FIELD_LENGTH)
+    }
+
+    return essential
+  })
+
+  return JSON.stringify(essentialData, null, 2)
+}
+
+async function generateAnswer(
+  query: string,
   products: ProductRecord[],
-  maxProducts: number = MAX_DETAILED_PRODUCTS
+  intent: string,
+  enhancedQuery: EnhancedQuery | null = null
 ): Promise<string> {
-  const allColumns = await getDatabaseColumns()
+  console.log(`🤖 AI generating answer for ${products.length} products`)
 
-  const priorityFields = [
-    'sku', 'family', 'Product_Name', 'Product_Type', 'Product_Model',
-    'Product_Description', 'Application'
-  ]
+  if (products.length === 0) {
+    return "I couldn't find any products matching your search. Please try different search terms or adjust your filters."
+  }
 
-  const essentialFields = priorityFields.filter(field => allColumns.includes(field))
-  const productsToSend = products.slice(0, maxProducts)
+  const approach = products.length <= MAX_DETAILED_PRODUCTS ? 'DETAILED ANALYSIS' : 'SUMMARY'
+  console.log(`⚡ ${approach} approach (${products.length} products)`)
 
-  return productsToSend.map((product, index) => {
-    const lines: string[] = []
-    lines.push(`\n${index + 1}. ${product.family || 'N/A'} | ${product.Product_Type || 'N/A'}`)
+  const productData = prepareEssentialProductData(products)
 
-    essentialFields.forEach(field => {
-      const value = product[field]
-      if (value && typeof value === 'string' && value.trim() !== '') {
-        const truncated = value.length > MAX_FIELD_LENGTH 
-          ? value.substring(0, MAX_FIELD_LENGTH) + '...' 
-          : value
-        lines.push(`   ${field}: ${truncated}`)
-      }
+  // 🎯 Enhanced system prompt with query context
+  const systemPrompt = `You are a coating/sealant product expert. Provide a helpful answer based on the products found.
+
+USER'S SEARCH CONTEXT:
+- Original query: "${enhancedQuery?.originalQuery || query}"
+- Search intent: "${enhancedQuery?.searchIntent || intent}"
+- Technical requirements: ${enhancedQuery?.technicalRequirements?.join(', ') || 'not specified'}
+- Expected product types: ${enhancedQuery?.expectedProductTypes?.join(', ') || 'any'}
+- Domain terms searched: ${enhancedQuery?.domainTerms?.slice(0, 5).join(', ') || 'none'}
+
+INSTRUCTIONS:
+1. **Address the user's actual intent**, not just list products
+2. **Explain WHY these products match** their requirements
+3. **Highlight key features** relevant to their query
+4. **Provide recommendations** if multiple products found
+5. **Be honest** if products don't perfectly match (suggest alternatives)
+6. **Use the enhanced query context** to provide more relevant answers
+
+FORMAT:
+- Use markdown (headers, lists, tables)
+- Start with a direct answer to their question
+- Then provide supporting details
+- End with actionable recommendations
+- Keep it concise but informative
+
+EXAMPLE (for "best coating for corrosion prevention"):
+"For corrosion prevention, I found [X] products that offer excellent protection:
+
+## Top Recommendations
+
+**1. [Product Name] (SKU: XXX)**
+- **Why it's ideal**: Contains corrosion inhibitors and provides long-term protection
+- **Key features**: Chemical resistant, adheres to metal substrates
+- **Best for**: Exterior metal surfaces exposed to harsh environments
+
+[Continue with other products...]
+
+## Selection Guidance
+- For maximum protection: Choose epoxy primers with zinc-rich formulation
+- For flexibility: Consider polyurethane topcoats
+- For specific environments: [provide context-specific advice]"
+
+Now analyze these ${products.length} products and provide a helpful answer:`
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Query: "${query}"\n\nProducts found:\n${productData}` }
+      ],
+      temperature: 0.3,
+      max_tokens: 2000
     })
 
-    return lines.join('\n')
-  }).join('\n')
-}
-
-function createFamilyGroupedSummary(products: ProductRecord[]): string {
-  const familyGroups: Record<string, ProductRecord[]> = {}
-
-  products.forEach(p => {
-    const family = p.family || 'Unknown'
-    if (!familyGroups[family]) {
-      familyGroups[family] = []
-    }
-    familyGroups[family].push(p)
-  })
-
-  const lines: string[] = []
-  lines.push(`Total Products: ${products.length}\n`)
-
-  Object.entries(familyGroups).forEach(([family, items]) => {
-    lines.push(`\n${family} (${items.length} products):`)
+    const answer = completion.choices[0].message.content || 'Unable to generate answer.'
+    console.log(`✅ Answer generated (${answer.length} chars)`)
     
-    const types = new Set(items.map(i => i.Product_Type).filter(Boolean))
-    types.forEach(type => {
-      const count = items.filter(i => i.Product_Type === type).length
-      lines.push(`  - ${type}: ${count}`)
-    })
-
-    // Show top 3 examples
-    const examples = items.slice(0, 3)
-    if (examples.length > 0) {
-      lines.push(`  Examples:`)
-      examples.forEach(ex => {
-        lines.push(`    • ${ex.Product_Type} (${ex.sku || 'N/A'})`)
-      })
-    }
-  })
-
-  return lines.join('\n')
+    return answer
+  } catch (error) {
+    console.error('❌ Answer generation failed:', error)
+    return `Found ${products.length} products matching your search. Please review the product list below for details.`
+  }
 }
 
 // ============================================================================
@@ -799,55 +1011,29 @@ function createFamilyGroupedSummary(products: ProductRecord[]): string {
 // ============================================================================
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now()
+  
   try {
     const body = await request.json()
-    const { query, filters } = body
+    const { query, filters, getFilterOptions: requestFilterOptions } = body
 
-    console.log(`\n${'='.repeat(80)}`)
+    console.log('================================================================================')
     console.log(`🔍 User query: ${query}`)
-    console.log(`🎯 Applied filters:`, filters)
+    console.log(`🎯 Applied filters:`, filters || {})
 
-    // ============================================================================
-    // 🎯 SPECIAL CASE: Filter Options Request
-    // ============================================================================
-    
-    if (query === '__GET_FILTER_OPTIONS__') {
-      console.log(`📋 Fetching filter options...`)
-      
-      try {
-        const result = await getFilterOptions()
-        
-        if (result.success) {
-          console.log(`✅ Filter options retrieved:`)
-          console.log(`   👨‍👩‍👧‍👦 ${result.filterOptions.families.length} families`)
-          console.log(`   📦 ${result.filterOptions.productTypes.length} product types`)
-          console.log(`   🏷️  ${result.filterOptions.productModels.length} product models`)
-          console.log(`   💾 Cached: ${result.cached ? 'Yes' : 'No'}`)
-          
-          return NextResponse.json({
-            success: true,
-            filterOptions: result.filterOptions,
-            cached: result.cached
-          })
-        } else {
-          console.error('❌ Failed to fetch filter options')
-          return NextResponse.json(
-            { error: 'Failed to fetch filter options' },
-            { status: 500 }
-          )
-        }
-      } catch (error: any) {
-        console.error('❌ Exception fetching filter options:', error)
-        return NextResponse.json(
-          { error: error.message || 'Failed to fetch filter options' },
-          { status: 500 }
-        )
-      }
+    // Handle filter options request
+    if (requestFilterOptions || query === '__GET_FILTER_OPTIONS__') {
+      console.log('📋 Fetching filter options...')
+      const filterOptions = await getFilterOptions()
+      return NextResponse.json(filterOptions)
     }
 
-    // ============================================================================
-    // 🎯 NORMAL SEARCH FLOW
-    // ============================================================================
+    if (!query || typeof query !== 'string' || query.trim() === '') {
+      return NextResponse.json({
+        success: false,
+        error: 'Query is required'
+      }, { status: 400 })
+    }
 
     const appliedFilters = {
       family: filters?.family || '',
@@ -855,114 +1041,48 @@ export async function POST(request: NextRequest) {
       productModel: filters?.productModel || ''
     }
 
-    // Step 1: AI Query Planning
+    // 🆕 Step 1: Enhance query with AI
+    const enhancedQuery = await enhanceQueryWithAI(query)
+
+    // Step 2: Plan query
     const plan = await planQuery(query, appliedFilters)
     console.log(`> 🎯 AI determined intent: ${plan.intent}`)
     console.log(`> 🔑 Search terms: ${plan.searchTerms.join(', ')}`)
 
-    // Step 2: Execute Smart Search
-    const products = await executeSmartSearch(plan, appliedFilters)
+    // Step 3: Execute smart search with enhanced query
+    const products = await executeSmartSearch(plan, appliedFilters, enhancedQuery)
     console.log(`> ✅ Found ${products.length} products`)
 
-    if (products.length === 0) {
-      return NextResponse.json({
-        success: true,
-        answer: "I couldn't find any products matching your search. Please try:\n\n" +
-                "- Using different keywords\n" +
-                "- Removing some filters\n" +
-                "- Checking spelling\n" +
-                "- Being more general (e.g., 'primer' instead of 'epoxy primer for aluminum')",
-        products: [],
-        intent: plan.intent,
-        searchTerms: plan.searchTerms
-      })
-    }
+    // Step 4: Generate AI answer with enhanced context
+    const answer = await generateAnswer(query, products, plan.intent, enhancedQuery)
 
-    // Step 3: Generate AI Answer
-    console.log(`🤖 AI generating answer for ${products.length} products`)
+    const endTime = Date.now()
+    const duration = ((endTime - startTime) / 1000).toFixed(1)
 
-    let answer = ''
-    
-    if (products.length <= MAX_DETAILED_PRODUCTS) {
-      // Detailed analysis for small result sets
-      console.log(`⚡ DETAILED ANALYSIS approach (${products.length} products)`)
-      
-      const productData = await prepareEssentialProductData(products, MAX_DETAILED_PRODUCTS)
-      
-      const systemPrompt = `You are a helpful product expert. Analyze the products and provide a comprehensive answer.
-
-IMPORTANT FORMATTING RULES:
-- Use markdown for structure (headers, lists, tables)
-- Be concise but informative
-- Highlight key differences when comparing products
-- Include product names, SKUs, and key specifications
-- If user asks "which products", list them clearly`
-
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `User Query: "${query}"\n\nProducts:\n${productData}` }
-        ],
-        temperature: 0.3,
-        max_tokens: 2000
-      })
-
-      answer = completion.choices[0].message.content || 'Unable to generate answer.'
-      
-    } else {
-      // Summary approach for large result sets
-      console.log(`⚡ SUMMARY approach (${products.length} products)`)
-      
-      const summary = createFamilyGroupedSummary(products)
-      
-      const systemPrompt = `You are a helpful product expert. Provide a concise summary of the product search results.
-
-IMPORTANT:
-- Start with total count
-- Group by family/category
-- Mention top representatives
-- Keep it brief (max 300 words)`
-
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `User Query: "${query}"\n\nSummary:\n${summary}` }
-        ],
-        temperature: 0.3,
-        max_tokens: 1000
-      })
-
-      answer = completion.choices[0].message.content || 'Unable to generate answer.'
-    }
-
-    console.log(`✅ Answer generated (${answer.length} chars)`)
-    console.log(`${'='.repeat(80)}\n`)
-
-    // Clean products before sending
-    const cleanedProducts = products.map(p => cleanProductData(p))
+    console.log('================================================================================')
+    console.log(`✅ Search completed in ${duration}s`)
+    console.log('')
 
     return NextResponse.json({
       success: true,
       answer,
-      products: cleanedProducts,
+      products: products.map(cleanProductData),
       intent: plan.intent,
       searchTerms: plan.searchTerms,
-      totalResults: products.length
+      enhancedQuery: enhancedQuery.enhancedQuery,
+      expectedTypes: enhancedQuery.expectedProductTypes,
+      totalResults: products.length,
+      searchTime: parseFloat(duration)
     })
 
   } catch (error: any) {
-    console.error('❌ API Error:', error)
-    console.error('   Stack:', error.stack)
+    console.error('❌ Search error:', error)
     
-    return NextResponse.json(
-      { 
-        success: false,
-        error: error.message || 'Internal server error',
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      success: false,
+      error: error.message || 'An error occurred during search',
+      products: [],
+      totalResults: 0
+    }, { status: 500 })
   }
 }
