@@ -284,13 +284,13 @@ function detectAndNormalizeProductCode(query: string): {
   // Pattern 3: CA8100 (prefix + number, no separator)
   const pattern3 = query.match(/\b([A-Z]{2,3})(\d{4,})\b/i)
 
-  // Pattern 4: 02Y04, 02Y024 (digits + letter + digits) ✅ NEW
+  // Pattern 4: 02Y04, 02Y024 (digits + letter + digits)
   const pattern4 = query.match(/\b(\d{2})([A-Z])(\d{2,3})\b/i)
 
-  // Pattern 5: Y-123 (single letter + hyphen + digits) ✅ NEW
+  // Pattern 5: Y-123 (single letter + hyphen + digits)
   const pattern5 = query.match(/\b([A-Z])-(\d{3,})\b/i)
 
-  // Pattern 6: 123Y456 (digits + letter + digits, longer) ✅ NEW
+  // Pattern 6: 123Y456 (digits + letter + digits, longer)
   const pattern6 = query.match(/\b(\d{1,3})([A-Z]{1,2})(\d{2,4})\b/i)
 
   // Series pattern: "01 series HS", "99 series"
@@ -367,7 +367,7 @@ function detectAndNormalizeProductCode(query: string): {
 }
 
 // ============================================================================
-// MULTI-PRODUCT COMPARISON SEARCH ✅ NEW
+// MULTI-PRODUCT COMPARISON SEARCH
 // ============================================================================
 
 async function searchMultipleProducts(
@@ -985,64 +985,166 @@ function cleanProductData(product: ProductRecord): ProductRecord {
   return cleaned
 }
 
-async function getFilterOptions(): Promise<any> {
-  if (filterCache && (Date.now() - filterCache.timestamp) < CACHE_TTL) {
-    return {
-      success: true,
-      cached: true,
-      filterOptions: {
-        families: filterCache.families,
-        productTypes: filterCache.productTypes,
-        productModels: filterCache.productModels
+// ============================================================================
+// FILTER OPTIONS WITH PAGINATION ✅ FIXED
+// ============================================================================
+
+async function fetchAllDistinctValues(columnName: string): Promise<string[]> {
+  console.log(`  📊 Fetching all distinct values for: ${columnName}`)
+
+  const allValues = new Set<string>()
+  let page = 0
+  const pageSize = 1000
+  let hasMore = true
+
+  while (hasMore) {
+    const from = page * pageSize
+    const to = from + pageSize - 1
+
+    try {
+      const { data, error } = await supabase
+        .from('coatings')
+        .select(columnName)
+        .not(columnName, 'is', null)
+        .neq(columnName, '')
+        .order(columnName)
+        .range(from, to)
+
+      if (error) {
+        console.error(`  ❌ Error fetching ${columnName}:`, error)
+        break
       }
+
+      if (!data || data.length === 0) {
+        break
+      }
+
+      data.forEach((row: any) => {
+        const value = row[columnName]
+        if (value && typeof value === 'string' && value.trim() !== '') {
+          allValues.add(value.trim())
+        }
+      })
+
+      console.log(`  📄 Page ${page + 1}: ${data.length} rows (${allValues.size} unique so far)`)
+
+      if (data.length < pageSize) {
+        hasMore = false
+      } else {
+        page++
+      }
+
+      // Safety limit: stop after 100 pages (100,000 rows)
+      if (page > 100) {
+        console.warn(`  ⚠️ Reached safety limit of 100 pages for ${columnName}`)
+        break
+      }
+
+    } catch (err) {
+      console.error(`  ❌ Exception fetching ${columnName}:`, err)
+      break
     }
   }
 
-  try {
-    const { data: families } = await supabase
-      .from('coatings')
-      .select('family')
-      .not('family', 'is', null)
-      .order('family')
+  const sortedValues = Array.from(allValues).sort()
+  console.log(`  ✅ ${columnName}: ${sortedValues.length} unique values`)
 
-    const { data: types } = await supabase
-      .from('coatings')
-      .select('Product_Type')
-      .not('Product_Type', 'is', null)
-      .order('Product_Type')
+  return sortedValues
+}
 
-    const { data: models } = await supabase
-      .from('coatings')
-      .select('Product_Model')
-      .not('Product_Model', 'is', null)
-      .order('Product_Model')
+// ============================================================================
+// FILTER OPTIONS WITH PAGINATION ✅ FIXED
+// ============================================================================
 
-    const uniqueFamilies = [...new Set(families?.map(f => f.family) || [])]
-    const uniqueTypes = [...new Set(types?.map(t => t.Product_Type) || [])]
-    const uniqueModels = [...new Set(models?.map(m => m.Product_Model) || [])]
+async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
+  console.log(`\n📋 Getting filter options (forceRefresh: ${forceRefresh})`)
 
-    filterCache = {
-      families: uniqueFamilies,
-      productTypes: uniqueTypes,
-      productModels: uniqueModels,
-      timestamp: Date.now()
+  // Check cache first
+  if (!forceRefresh && filterCache) {
+    const now = Date.now()
+    const cacheAge = now - filterCache.timestamp
+
+    if (cacheAge < CACHE_TTL) {
+      const ageMinutes = Math.floor(cacheAge / 1000 / 60)
+      console.log(`✅ Using cached filter options (age: ${ageMinutes} minutes)`)
+      return {
+        success: true,
+        cached: true,
+        cacheAge: ageMinutes,
+        filterOptions: {
+          families: filterCache.families,
+          productTypes: filterCache.productTypes,
+          productModels: filterCache.productModels
+        }
+      }
     }
+
+    console.log(`⚠️ Cache expired (age: ${Math.floor(cacheAge / 1000 / 60)} minutes)`)
+  }
+
+  console.log(`🔄 Fetching fresh filter options from database...`)
+  const startTime = Date.now()
+
+  try {
+    // Fetch all distinct values with pagination
+    const [families, types, models] = await Promise.all([
+      fetchAllDistinctValues('family'),
+      fetchAllDistinctValues('Product_Type'),
+      fetchAllDistinctValues('Product_Model')
+    ])
+
+    // Update cache
+    filterCache = {
+      families,
+      productTypes: types,
+      productModels: models,
+      timestamp: Date.now(),
+      ttl: CACHE_TTL
+    }
+
+    const loadTime = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`\n✅ Filter options loaded in ${loadTime}s:`)
+    console.log(`   👨‍👩‍👧‍👦 Families: ${families.length}`)
+    console.log(`   🏷️  Product Types: ${types.length}`)
+    console.log(`   📦 Product Models: ${models.length}`)
 
     return {
       success: true,
       cached: false,
+      loadTime: `${loadTime}s`,
       filterOptions: {
-        families: uniqueFamilies,
-        productTypes: uniqueTypes,
-        productModels: uniqueModels
+        families,
+        productTypes: types,
+        productModels: models
       }
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Error fetching filter options:', error)
+
+    // If we have expired cache, return it as fallback
+    if (filterCache) {
+      console.log('⚠️ Returning expired cache as fallback')
+      return {
+        success: true,
+        cached: true,
+        expired: true,
+        error: error.message,
+        filterOptions: {
+          families: filterCache.families,
+          productTypes: filterCache.productTypes,
+          productModels: filterCache.productModels
+        }
+      }
+    }
+
     return {
       success: false,
-      error: 'Failed to fetch filter options',
-      filterOptions: { families: [], productTypes: [], productModels: [] }
+      error: error.message || 'Failed to fetch filter options',
+      filterOptions: { 
+        families: [], 
+        productTypes: [], 
+        productModels: [] 
+      }
     }
   }
 }
