@@ -454,7 +454,7 @@ async function searchMultipleProducts(
 }
 
 // ============================================================================
-// AI QUERY ENHANCEMENT
+// AI QUERY ENHANCEMENT - ✅ FIXED
 // ============================================================================
 
 async function enhanceQueryWithAI(query: string): Promise<EnhancedQuery> {
@@ -478,7 +478,7 @@ Extract:
 3. Applications (e.g., "fuel tank", "exterior", "cabin")
 4. Search intent
 
-Return JSON:
+Return ONLY valid JSON (no markdown, no code blocks):
 {
   "enhancedQuery": "expanded query with technical terms",
   "searchIntent": "what user is looking for",
@@ -494,10 +494,18 @@ Return JSON:
         { role: 'user', content: `Query: "${query}"` }
       ],
       temperature: 0.3,
-      max_tokens: 500
+      max_tokens: 500,
+      response_format: { type: "json_object" }  // ✅ Forces valid JSON output
     })
 
-    const content = completion.choices[0].message.content || '{}'
+    let content = completion.choices[0].message.content || '{}'
+    
+    // ✅ FIX: Strip markdown code blocks if present (backup safety)
+    content = content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim()
+    
     const parsed = JSON.parse(content)
 
     const enhanced: EnhancedQuery = {
@@ -541,7 +549,7 @@ Return JSON:
 }
 
 // ============================================================================
-// AI QUERY ANALYSIS
+// AI QUERY ANALYSIS - ✅ FIXED
 // ============================================================================
 
 async function analyzeQueryWithAI(query: string): Promise<AIQueryPlan> {
@@ -557,7 +565,7 @@ Intents:
 - count: User wants to know how many (e.g., "how many primers do we have")
 - analytical: User wants analysis (e.g., "what's the difference between...")
 
-Return JSON:
+Return ONLY valid JSON (no markdown, no code blocks):
 {
   "intent": "comparison|lookup|list|count|analytical",
   "searchTerms": ["term1", "term2"],
@@ -575,15 +583,23 @@ Extract ALL product codes mentioned. For "Compare 02Y024, 02Y024A, 02Y024B", ret
         { role: 'user', content: `Query: "${query}"` }
       ],
       temperature: 0.3,
-      max_tokens: 500
+      max_tokens: 500,
+      response_format: { type: "json_object" }  // ✅ Forces valid JSON output
     })
 
-    const content = completion.choices[0].message.content || '{}'
+    let content = completion.choices[0].message.content || '{}'
+    
+    // ✅ FIX: Strip markdown code blocks if present (backup safety)
+    content = content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim()
+    
     const parsed = JSON.parse(content)
 
     const plan: AIQueryPlan = {
       intent: parsed.intent || 'lookup',
-      searchTerms: parsed.searchTerms || [query],
+      searchTerms: (parsed.searchTerms && parsed.searchTerms.length > 0) ? parsed.searchTerms : [query],
       filters: parsed.filters || {},
       requiresMultipleProducts: parsed.requiresMultipleProducts || false,
       explanation: parsed.explanation || ''
@@ -600,6 +616,7 @@ Extract ALL product codes mentioned. For "Compare 02Y024, 02Y024A, 02Y024B", ret
     return {
       intent: 'lookup',
       searchTerms: [query],
+      filters: {},
       requiresMultipleProducts: false,
       explanation: 'Fallback to simple lookup'
     }
@@ -728,7 +745,7 @@ async function performKeywordSearch(
 }
 
 // ============================================================================
-// SMART SEARCH ORCHESTRATOR ✅ IMPROVED
+// SMART SEARCH ORCHESTRATOR
 // ============================================================================
 
 async function executeSmartSearch(
@@ -788,9 +805,12 @@ async function executeSmartSearch(
   const searchQuery = enhancedQuery?.enhancedQuery || plan.searchTerms.join(' ')
   const productCodeInfo = detectAndNormalizeProductCode(searchQuery)
 
+  // ✅ Validate searchTerms to prevent undefined access
+  const firstTerm = plan.searchTerms[0] || ''
+  
   const queryAnalysis: QueryAnalysis = {
-    isSingleWord: plan.searchTerms.length === 1 && !plan.searchTerms[0].includes(' '),
-    isMultiWord: plan.searchTerms.length > 1 || plan.searchTerms[0].includes(' '),
+    isSingleWord: plan.searchTerms.length === 1 && !firstTerm.includes(' '),
+    isMultiWord: plan.searchTerms.length > 1 || firstTerm.includes(' '),
     wordCount: plan.searchTerms.length,
     requiresAllWords: plan.intent === 'lookup',
     searchStrategy: productCodeInfo.isProductCode ? 'keyword-first' : 'semantic-first',
@@ -926,7 +946,7 @@ Found ${products.length} products:
 ${productSummaries}
 
 Intent: ${intent}
-${enhancedQuery ? `Enhanced Query: ${enhancedQuery.enhancedQuery}` : ''}
+${enhancedQuery ? 'Enhanced Query: ' + enhancedQuery.enhancedQuery : ''}
 
 Provide a helpful answer based on the products found.`
 
@@ -986,7 +1006,7 @@ function cleanProductData(product: ProductRecord): ProductRecord {
 }
 
 // ============================================================================
-// FILTER OPTIONS WITH PAGINATION ✅ FIXED
+// FILTER OPTIONS WITH PAGINATION
 // ============================================================================
 
 async function fetchAllDistinctValues(columnName: string): Promise<string[]> {
@@ -1051,10 +1071,6 @@ async function fetchAllDistinctValues(columnName: string): Promise<string[]> {
 
   return sortedValues
 }
-
-// ============================================================================
-// FILTER OPTIONS WITH PAGINATION ✅ FIXED
-// ============================================================================
 
 async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
   console.log(`\n📋 Getting filter options (forceRefresh: ${forceRefresh})`)
