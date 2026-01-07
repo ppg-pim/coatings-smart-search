@@ -178,164 +178,149 @@ export default function CoatingsPage() {
     return html;
   }
 
-	const loadFilterOptionsInline = async () => {
-	  console.log('🔄 Loading filter options...')
-	  setLoadingFilters(true)
-	  
-	  try {
-		const response = await fetch('/api/coatings-smart-search', {
-		  method: 'POST',
-		  headers: { 'Content-Type': 'application/json' },
-		  body: JSON.stringify({ 
-			query: '__GET_FILTER_OPTIONS__',
-			getFilterOptions: true 
-		  })
-		})
+  const handleSearch = async () => {
+    if (!query.trim()) {
+      setError('Please enter a search query')
+      return
+    }
 
-		console.log('📡 Filter options response status:', response.status)
+    setLoading(true)
+    setError('')
+    setAiAnswer('')
+    setSearchIntent('')
+    setResults([])
+    setSpecificAnswer(null)
+    setComparisonData(null)
+    setAnalyticalData(null)
+    setMetaQuestionData(null)
+    setHasSearched(true)
+    setSearchProgress('Searching...')
+    setSearchTime(null)
 
-		if (response.ok) {
-		  const data = await response.json()
-		  console.log('📦 Filter options data received:', {
-			success: data.success,
-			familyCount: data.filterOptions?.families?.length,
-			typeCount: data.filterOptions?.productTypes?.length,
-			modelCount: data.filterOptions?.productModels?.length
-		  })
-		  
-		  if (data.success && data.filterOptions) {
-			console.log('✅ Setting filter options in state')
-			setFamilyOptions(data.filterOptions.families || [])
-			setProductTypeOptions(data.filterOptions.productTypes || [])
-			setProductModelOptions(data.filterOptions.productModels || [])
-			
-			console.log('✅ Filter options loaded successfully:', {
-			  families: data.filterOptions.families?.length || 0,
-			  types: data.filterOptions.productTypes?.length || 0,
-			  models: data.filterOptions.productModels?.length || 0
-			})
-		  } else {
-			console.error('❌ Invalid response structure:', data)
-			setError('Failed to load filter options: Invalid response')
-		  }
-		} else {
-		  const errorText = await response.text()
-		  console.error('❌ Failed to load filter options:', response.status, errorText)
-		  setError(`Failed to load filter options: ${response.status}`)
-		}
-	  } catch (err: any) {
-		console.error('❌ Exception loading filter options:', err)
-		setError(`Failed to load filter options: ${err.message}`)
-	  } finally {
-		setLoadingFilters(false)
-	  }
-	}
+    const searchStartTime = Date.now()
 
-	const handleSearch = async () => {
-	  setLoading(true)
-	  setError('')
-	  setHasSearched(true)
-	  setResults([])
-	  setAiAnswer('')
-	  setSpecificAnswer(null)
-	  setComparisonData(null)
-	  setAnalyticalData(null)
-	  setMetaQuestionData(null)
-	  
-	  const startTime = Date.now()
-
-	  try {
-		const response = await fetch('/api/coatings-smart-search', {
-		  method: 'POST',
-		  headers: { 'Content-Type': 'application/json' },
-		  body: JSON.stringify({
-			query,
-			filters: {
-			  family: selectedFamily,
-			  productType: selectedProductType,
-			  productModel: selectedProductModel
-			}
-		  })
-		})
-
-		if (!response.ok) {
-		  throw new Error(`HTTP error! status: ${response.status}`)
-		}
-
-		const data = await response.json()
-		
-		// 🔍 DEBUG
-		console.log('🔍 Full API Response:', data)
-		console.log('🔍 Results:', data.results)
-		console.log('🔍 Results count:', data.results?.length || 0)
-
-		const endTime = Date.now()
-		setSearchTime((endTime - startTime) / 1000)
-
-		// ✅ Handle different response structures
-		if (data.metaQuestion) {
-		  setMetaQuestionData(data.metaQuestion)
-		  setResults([])
-		} else if (data.specificAnswer) {
-		  setSpecificAnswer(data.specificAnswer)
-		  setResults(data.results || [])
-		} else if (data.comparison) {
-		  setComparisonData(data.comparison)
-		  setResults(data.results || [])
-		} else if (data.analytical) {
-		  setAnalyticalData(data.analytical)
-		  setResults(data.results || [])
-		} else {
-		  // Normal search results
-		  setResults(data.results || [])
-		}
-
-		// Set AI answer if available
-		if (data.aiAnswer) {
-		  setAiAnswer(data.aiAnswer)
-		}
-		
-		// Set search intent
-		if (data.intent) {
-		  setSearchIntent(data.intent)
-		}
-
-	  } catch (err: any) {
-		console.error('❌ Search error:', err)
-		setError(err.message || 'An error occurred during search')
-	  } finally {
-		setLoading(false)
-	  }
-	}
-
-  const fetchFilteredProducts = async (filter: { filterType: string; filterValue: string }) => {
     try {
-      console.log(`🔍 Fetching products with ${filter.filterType} = ${filter.filterValue}`)
-      
-      const searchQuery = `products in ${filter.filterValue} ${filter.filterType}`
-      
       const response = await fetch('/api/coatings-smart-search', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          filters: {
+            family: selectedFamily || undefined,
+            productType: selectedProductType || undefined,
+            productModel: selectedProductModel || undefined
+          }
+        })
+      })
+
+      const data = await response.json()
+      const searchEndTime = Date.now()
+      const timeTaken = ((searchEndTime - searchStartTime) / 1000).toFixed(2)
+      setSearchTime(parseFloat(timeTaken))
+
+      console.log('🔍 Response data:', {
+        questionType: data.questionType,
+        intent: data.intent,
+        hasComparison: !!data.comparison,
+        hasProducts: !!data.comparison?.products,
+        productCount: data.comparison?.products?.length,
+        hasSummary: !!data.comparison?.summary,
+        hasSpecificAnswer: !!data.specificAnswer,
+        hasAnalytical: !!data.analytical,
+        hasMetaQuestion: !!data.metaQuestion
+      })
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Search failed')
+      }
+
+      // ✅ CRITICAL: Check comparison FIRST (before specificAnswer)
+      if (data.comparison) {
+        console.log('✅ Setting comparison data:', {
+          productCount: data.comparison.products?.length,
+          summaryLength: data.comparison.summary?.length
+        })
+        setComparisonData(data.comparison)
+        setResults(data.results || data.comparison.products || [])
+        setAiAnswer(data.comparison.summary || data.aiAnswer || '')
+        setSearchIntent('comparison')
+      } else if (data.metaQuestion) {
+        console.log('✅ Setting meta question data')
+        setMetaQuestionData(data.metaQuestion)
+        setResults(data.results || [])
+        setAiAnswer(data.metaQuestion.summary || data.aiAnswer || '')
+        setSearchIntent(data.metaQuestion.type || 'meta')
+      } else if (data.specificAnswer) {
+        console.log('✅ Setting specific answer data')
+        setSpecificAnswer(data.specificAnswer)
+        setResults(data.results || [])
+        setAiAnswer(data.specificAnswer.answer || data.aiAnswer || '')
+        setSearchIntent('specific')
+      } else if (data.analytical) {
+        console.log('✅ Setting analytical data')
+        setAnalyticalData(data.analytical)
+        setResults(data.results || [])
+        setAiAnswer(data.analytical.summary || data.aiAnswer || '')
+        setSearchIntent('analytical')
+      } else {
+        // Normal search results
+        console.log('✅ Setting normal search results')
+        setResults(data.results || [])
+        setAiAnswer(data.aiAnswer || '')
+        setSearchIntent(data.intent || 'general')
+      }
+
+      setSearchProgress('')
+    } catch (err: any) {
+      console.error('❌ Search error:', err)
+      setError(err.message || 'An error occurred while searching')
+      setSearchProgress('')
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  const loadFilterOptionsInline = async (retryCount = 0) => {
+    console.log('🔄 Loading filter options...')
+    setLoadingFilters(true)
+    
+    try {
+      const response = await fetch('/api/coatings-smart-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          query: searchQuery,
-          family: filter.filterType === 'family' ? filter.filterValue : '',
-          productType: filter.filterType === 'type' ? filter.filterValue : '',
-          productModel: filter.filterType === 'model' ? filter.filterValue : ''
-        }),
+          query: '__GET_FILTER_OPTIONS__',
+          getFilterOptions: true 
+        })
       })
 
       if (response.ok) {
         const data = await response.json()
-        if (data.products && data.products.length > 0) {
-          console.log(`✅ Fetched ${data.products.length} products`)
-          setResults(data.products)
+        
+        if (data.success && data.filterOptions) {
+          setFamilyOptions(data.filterOptions.families || [])
+          setProductTypeOptions(data.filterOptions.productTypes || [])
+          setProductModelOptions(data.filterOptions.productModels || [])
+          
+          console.log('✅ Filter options loaded successfully')
+        } else {
+          throw new Error('Invalid response structure')
         }
+      } else {
+        throw new Error(`HTTP ${response.status}`)
       }
-    } catch (err) {
-      console.error('Error fetching filtered products:', err)
+    } catch (err: any) {
+      console.error('❌ Exception loading filter options:', err)
+      
+      // ✅ Retry once if first attempt fails
+      if (retryCount < 1) {
+        console.log('🔄 Retrying filter load...')
+        setTimeout(() => loadFilterOptionsInline(retryCount + 1), 2000)
+      } else {
+        setError(`Failed to load filter options: ${err.message}`)
+      }
+    } finally {
+      setLoadingFilters(false)
     }
   }
 
@@ -391,13 +376,18 @@ export default function CoatingsPage() {
     const fieldMappings: { [key: string]: string } = {
       'sku': 'SKU',
       'product_name': 'Product Name',
+      'Product_Name': 'Product Name',
       'productname': 'Product Name',
       'product_description': 'Description',
+      'Product_Description': 'Description',
       'description': 'Description',
       'product_model': 'Product Model',
+      'Product_Model': 'Product Model',
       'productmodel': 'Product Model',
       'product_type': 'Product Type',
+      'Product_Type': 'Product Type',
       'producttype': 'Product Type',
+      'family': 'Family',
     }
     
     const lowerKey = key.toLowerCase()
@@ -452,6 +442,349 @@ export default function CoatingsPage() {
     }
   }
 
+  // ✅ FIXED: Updated renderLookupSummary with specificAnswer check
+  const renderLookupSummary = () => {
+    // Don't show if no AI answer
+    if (!aiAnswer) return null
+    
+    // Don't show for comparison, analytical, meta, or specific answers
+    if (comparisonData || analyticalData || metaQuestionData || specificAnswer) {
+      return null
+    }
+    
+    // Only show for general searches with multiple results
+    if (results.length === 0) return null
+
+    return (
+      <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-xl p-6 shadow-lg mb-6">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="flex-shrink-0">
+            <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h2 className="text-2xl font-bold text-blue-900 mb-2">
+              🔍 Search Results
+            </h2>
+            <div 
+              className="prose prose-blue max-w-none text-blue-900"
+              dangerouslySetInnerHTML={{ 
+                __html: renderMarkdown(aiAnswer, 'blue') 
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+	const renderComparison = () => {
+	  if (!comparisonData) return null
+
+	  return (
+		<>
+		  {/* Comparison Summary and Analysis */}
+		  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-xl p-6 shadow-lg mb-6">
+			<div className="flex items-start gap-3 mb-4">
+			  <div className="flex-shrink-0">
+				<svg className="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+				</svg>
+			  </div>
+			  <div className="flex-1">
+				<h2 className="text-2xl font-bold text-purple-900 mb-2">
+				  📊 Product Comparison
+				</h2>
+				
+				{/* Comparison Summary */}
+				{comparisonData.summary && (
+				  <div 
+					className="prose prose-purple max-w-none text-purple-900 mb-6"
+					dangerouslySetInnerHTML={{ 
+					  __html: renderMarkdown(comparisonData.summary, 'purple') 
+					}}
+				  />
+				)}
+
+				{/* Comparison Table */}
+				{comparisonData.products && comparisonData.products.length > 0 && (
+				  <div className="overflow-x-auto">
+					<table className="min-w-full bg-white rounded-lg overflow-hidden shadow-md">
+					  <thead className="bg-purple-600 text-white">
+						<tr>
+						  <th className="px-4 py-3 text-left font-semibold">Feature</th>
+						  {comparisonData.products.map((product: any, idx: number) => (
+							<th key={idx} className="px-4 py-3 text-left font-semibold">
+							  {product.Product_Name || product.sku}
+							</th>
+						  ))}
+						</tr>
+					  </thead>
+					  <tbody className="divide-y divide-gray-200">
+						{/* SKU Row */}
+						<tr className="hover:bg-purple-50">
+						  <td className="px-4 py-3 font-semibold text-purple-900">SKU</td>
+						  {comparisonData.products.map((product: any, idx: number) => (
+							<td key={idx} className="px-4 py-3 text-gray-700">
+							  {product.sku || 'N/A'}
+							</td>
+						  ))}
+						</tr>
+
+						{/* Family Row */}
+						<tr className="hover:bg-purple-50">
+						  <td className="px-4 py-3 font-semibold text-purple-900">Family</td>
+						  {comparisonData.products.map((product: any, idx: number) => (
+							<td key={idx} className="px-4 py-3 text-gray-700">
+							  {product.family || 'N/A'}
+							</td>
+						  ))}
+						</tr>
+
+						{/* Product Type Row */}
+						<tr className="hover:bg-purple-50">
+						  <td className="px-4 py-3 font-semibold text-purple-900">Product Type</td>
+						  {comparisonData.products.map((product: any, idx: number) => (
+							<td key={idx} className="px-4 py-3 text-gray-700">
+							  {product.Product_Type || 'N/A'}
+							</td>
+						  ))}
+						</tr>
+
+						{/* Description Row */}
+						<tr className="hover:bg-purple-50">
+						  <td className="px-4 py-3 font-semibold text-purple-900">Description</td>
+						  {comparisonData.products.map((product: any, idx: number) => (
+							<td key={idx} className="px-4 py-3 text-gray-700 text-sm">
+							  {product.Product_Description || 'N/A'}
+							</td>
+						  ))}
+						</tr>
+						{/* Key Specifications - ONLY SHOW DIFFERENCES */}
+						{comparisonData.comparedFields && comparisonData.comparedFields.length > 0 && (() => {
+						  // Filter to only show fields where values differ
+						  const differingFields = comparisonData.comparedFields.filter((field: string) => {
+							const values = comparisonData.products.map((p: any) => p[field])
+							const uniqueValues = new Set(values.map((v: any) => JSON.stringify(v)))
+							return uniqueValues.size > 1 // Only keep if values differ
+						  })
+
+						  // If no differences, show a message
+						  if (differingFields.length === 0) {
+							return (
+							  <tr>
+								<td colSpan={comparisonData.products.length + 1} className="px-4 py-6 text-center text-gray-500 italic">
+								  No specification differences found in compared fields.
+								</td>
+							  </tr>
+							)
+						  }
+
+						  return differingFields.map((field: string, fieldIdx: number) => (
+							<tr key={fieldIdx} className="hover:bg-purple-50">
+							  <td className="px-4 py-3 font-semibold text-purple-900">
+								{field.replace(/_/g, ' ')}
+							  </td>
+							  {comparisonData.products.map((product: any, idx: number) => (
+								<td key={idx} className="px-4 py-3 text-gray-700 text-sm">
+								  {product[field] || 'N/A'}
+								</td>
+							  ))}
+							</tr>
+						  ))
+						})()}
+					  </tbody>
+					</table>
+				  </div>
+				)}
+
+				{/* Key Differences */}
+				{comparisonData.keyDifferences && comparisonData.keyDifferences.length > 0 && (
+				  <div className="mt-6 bg-purple-100 rounded-lg p-4">
+					<h3 className="text-lg font-bold text-purple-900 mb-2">🔑 Key Differences</h3>
+					<ul className="list-disc list-inside space-y-1 text-purple-900">
+					  {comparisonData.keyDifferences.map((diff: string, idx: number) => (
+						<li key={idx}>{diff}</li>
+					  ))}
+					</ul>
+				  </div>
+				)}
+
+				{/* Recommendations */}
+				{comparisonData.recommendation && (
+				  <div className="mt-4 bg-purple-100 rounded-lg p-4">
+					<h3 className="text-lg font-bold text-purple-900 mb-2">💡 Recommendation</h3>
+					<p className="text-purple-900">{comparisonData.recommendation}</p>
+				  </div>
+				)}
+			  </div>
+			</div>
+		  </div>
+
+			{/* ✅ NEW: Side-by-Side Product Table (Up to 4 products) */}
+			{comparisonData.products && comparisonData.products.length > 0 && (
+			  <div id="product-references" className="bg-white rounded-lg shadow-sm p-4 sm:p-6 mb-6">
+				<div className="flex items-center justify-between mb-6">
+				  <h2 className="text-2xl font-bold" style={{ color: '#0078a9' }}>
+					📦 Product Details
+				  </h2>
+				  <span className="px-4 py-2 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold">
+					Comparing {comparisonData.products.length} Products
+				  </span>
+				</div>
+
+				{/* Product Details Table */}
+				<div className="overflow-x-auto">
+				  <table className="min-w-full bg-white border-2 border-purple-300 rounded-lg overflow-hidden shadow-lg">
+					{/* Table Header - Product Names */}
+					<thead className="bg-gradient-to-r from-purple-600 to-pink-600">
+					  <tr>
+						<th className="px-4 py-4 text-left font-bold text-white border-r-2 border-purple-400 sticky left-0 bg-purple-600 z-10" style={{ minWidth: '200px' }}>
+						  Specification
+						</th>
+						{comparisonData.products.slice(0, 4).map((product: any, idx: number) => (
+						  <th key={idx} className="px-4 py-4 text-left font-bold text-white border-r-2 last:border-r-0" style={{ minWidth: '250px' }}>
+							<div className="flex flex-col gap-2">
+							  <span className="text-xs uppercase tracking-wide opacity-90">Product {idx + 1}</span>
+							  <span className="text-base font-bold">{product.Product_Name || product.sku || 'Unknown'}</span>
+							  <span className="text-xs bg-purple-500 px-2 py-1 rounded inline-block w-fit">
+								{product.Product_Type || 'N/A'}
+							  </span>
+							</div>
+						  </th>
+						))}
+					  </tr>
+					</thead>
+
+					<tbody className="divide-y divide-purple-200">
+					  {/* SKU Row */}
+					  <tr className="hover:bg-purple-50 transition-colors">
+						<td className="px-4 py-3 font-bold text-purple-900 bg-purple-50 border-r-2 border-purple-200 sticky left-0 z-10">
+						  SKU
+						</td>
+						{comparisonData.products.slice(0, 4).map((product: any, idx: number) => (
+						  <td key={idx} className="px-4 py-3 text-gray-800 border-r-2 border-purple-100 last:border-r-0">
+							<span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">
+							  {product.sku || 'N/A'}
+							</span>
+						  </td>
+						))}
+					  </tr>
+
+					  {/* Family Row */}
+					  <tr className="hover:bg-purple-50 transition-colors">
+						<td className="px-4 py-3 font-bold text-purple-900 bg-purple-50 border-r-2 border-purple-200 sticky left-0 z-10">
+						  Family
+						</td>
+						{comparisonData.products.slice(0, 4).map((product: any, idx: number) => (
+						  <td key={idx} className="px-4 py-3 text-gray-800 border-r-2 border-purple-100 last:border-r-0">
+							{product.family || 'N/A'}
+						  </td>
+						))}
+					  </tr>
+
+					  {/* Product Description Row */}
+					  <tr className="hover:bg-purple-50 transition-colors">
+						<td className="px-4 py-3 font-bold text-purple-900 bg-purple-50 border-r-2 border-purple-200 sticky left-0 z-10">
+						  Description
+						</td>
+						{comparisonData.products.slice(0, 4).map((product: any, idx: number) => (
+						  <td key={idx} className="px-4 py-3 text-gray-700 text-sm border-r-2 border-purple-100 last:border-r-0">
+							<div className="max-h-24 overflow-y-auto">
+							  {product.Product_Description || 'N/A'}
+							</div>
+						  </td>
+						))}
+					  </tr>
+
+					  {/* Dynamic Rows - All Other Specifications */}
+					  {(() => {
+						// Get all unique attribute keys from all products
+						const allKeys = new Set<string>()
+						comparisonData.products.slice(0, 4).forEach((product: any) => {
+						  Object.keys(product).forEach(key => {
+							// Exclude already shown fields and system fields
+							if (!['Product_Name', 'sku', 'family', 'Product_Type', 'Product_Description', 
+								  'embedding', 'created_at', 'updated_at', '_relevanceScore', '_sourceTable',
+								  'similarity', 'searchable_text'].includes(key)) {
+							  allKeys.add(key)
+							}
+						  })
+						})
+
+						// Convert to array and sort
+						const sortedKeys = Array.from(allKeys).sort()
+
+						return sortedKeys.map((key, rowIdx) => (
+						  <tr key={rowIdx} className="hover:bg-purple-50 transition-colors">
+							<td className="px-4 py-3 font-bold text-purple-900 bg-purple-50 border-r-2 border-purple-200 sticky left-0 z-10">
+							  {formatFieldName(key)}
+							</td>
+							{comparisonData.products.slice(0, 4).map((product: any, idx: number) => {
+							  const value = product[key]
+							  const isDifferent = comparisonData.products.slice(0, 4).some((p: any) => p[key] !== value)
+							  
+							  return (
+								<td 
+								  key={idx} 
+								  className={`px-4 py-3 text-sm border-r-2 border-purple-100 last:border-r-0 ${
+									isDifferent ? 'bg-yellow-50 font-semibold text-gray-900' : 'text-gray-700'
+								  }`}
+								>
+								  <div className="max-h-20 overflow-y-auto">
+									{value ? (
+									  <span dangerouslySetInnerHTML={{ __html: formatValue(key, value) }} />
+									) : (
+									  <span className="text-gray-400 italic">N/A</span>
+									)}
+								  </div>
+								</td>
+							  )
+							})}
+						  </tr>
+						))
+					  })()}
+					</tbody>
+				  </table>
+				</div>
+
+				{/* Legend */}
+				<div className="mt-4 flex items-center gap-4 text-sm text-gray-600">
+				  <div className="flex items-center gap-2">
+					<div className="w-4 h-4 bg-yellow-50 border border-yellow-200 rounded"></div>
+					<span>Highlighted = Different values across products</span>
+				  </div>
+				  <div className="flex items-center gap-2">
+					<div className="w-4 h-4 bg-white border border-gray-200 rounded"></div>
+					<span>Same value across all products</span>
+				  </div>
+				</div>
+
+				{/* Show warning if more than 4 products */}
+				{comparisonData.products.length > 4 && (
+				  <div className="mt-4 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+					<div className="flex items-start">
+					  <svg className="w-5 h-5 text-yellow-600 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+						<path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+					  </svg>
+					  <div>
+						<h3 className="text-sm font-semibold text-yellow-800">
+						  Showing first 4 of {comparisonData.products.length} products
+						</h3>
+						<p className="text-sm text-yellow-700 mt-1">
+						  The table displays up to 4 products side-by-side. Additional products are not shown in the comparison table.
+						</p>
+					  </div>
+					</div>
+				  </div>
+				)}
+			  </div>
+			)}
+		</>
+	  )
+	}
+
   // 🎯 NEW: Render AI Summary (Primary Display)
   const renderAISummary = () => {
     if (!aiAnswer || comparisonData || analyticalData || metaQuestionData) return null
@@ -473,6 +806,7 @@ export default function CoatingsPage() {
                   {searchIntent === 'list' && 'Product Catalog'}
                   {searchIntent === 'count' && 'Product Count'}
                   {searchIntent === 'analytical' && 'Expert Recommendation'}
+                  {searchIntent === 'specific' && 'Product Details'}
                   {!searchIntent && 'Search Results'}
                 </p>
               </div>
@@ -632,218 +966,6 @@ export default function CoatingsPage() {
                 </svg>
                 <span className="text-xs sm:text-sm font-medium text-blue-900">
                   {results.length} coating product reference{results.length !== 1 ? 's' : ''} available below
-                </span>
-              </div>
-              <button
-                onClick={scrollToProducts}
-                className="relative z-10 text-xs sm:text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer whitespace-nowrap"
-                type="button"
-              >
-                View Details →
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  const renderComparison = () => {
-    if (!comparisonData || !comparisonData.products || comparisonData.products.length < 2) {
-      return null
-    }
-
-    const products = comparisonData.products
-    const allKeys = getAllKeys(products)
-    
-    const priorityFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
-    
-    const priority = allKeys
-      .filter(k => priorityFieldsOrder.includes(k.toLowerCase()))
-      .sort((a, b) => {
-        const indexA = priorityFieldsOrder.indexOf(a.toLowerCase())
-        const indexB = priorityFieldsOrder.indexOf(b.toLowerCase())
-        return indexA - indexB
-      })
-    
-    const technical = allKeys.filter(k => !priorityFieldsOrder.includes(k.toLowerCase()))
-
-    return (
-      <div className="mb-8">
-        <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-4 sm:p-6 rounded-lg">
-          <h2 className="text-xl sm:text-2xl font-bold text-blue-900 mb-2">Coating Product Comparison</h2>
-          <p className="text-blue-700 text-xs sm:text-sm">
-            Comparing {products.length} coating products - Differences are highlighted
-            {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
-          </p>
-        </div>
-
-        {comparisonData.summary && (
-          <div className="mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
-            <div className="p-4 sm:p-6">
-              <div className="flex items-start mb-4">
-                <div className="flex-shrink-0">
-                  <svg className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                </div>
-                <div className="ml-3 sm:ml-4 flex-1">
-                  <h3 className="text-lg sm:text-xl font-bold text-purple-900 mb-2">AI Comparison Analysis</h3>
-                  <p className="text-purple-700 text-xs sm:text-sm">
-                    Detailed comparison of {products.length} products
-                  </p>
-                </div>
-              </div>
-              
-              <div className="prose prose-purple max-w-none text-sm sm:text-base">
-                <div 
-                  className="text-gray-800 leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(comparisonData.summary, 'purple') }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px]">
-              <thead>
-                <tr className="bg-gray-50 border-b-2 border-gray-200">
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-700 sticky left-0 bg-gray-50 z-10">
-                    Attribute
-                  </th>
-                  {products.map((product: any, idx: number) => (
-                    <th 
-                      key={idx} 
-                      className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold"
-                      style={{ color: '#0078a9' }}
-                    >
-                      <div className="font-bold">{product.sku || product.Product_Name || `Product ${idx + 1}`}</div>
-                      {product.family && (
-                        <div className="text-xs font-normal text-gray-600 mt-1">Family: {product.family}</div>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {priority.map((key) => {
-                  const different = isDifferent(key, products)
-                  return (
-                    <tr 
-                      key={key} 
-                      className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
-                    >
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-700 sticky left-0 bg-white z-10">
-                        <div className="flex items-center gap-2">
-                          {formatFieldName(key)}
-                          {different && (
-                            <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Different values"></span>
-                          )}
-                        </div>
-                      </td>
-                      {products.map((product: any, idx: number) => (
-                        <td 
-                          key={idx} 
-                          className={`px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
-                        >
-                          {formatValue(key, product[key]) || '-'}
-                        </td>
-                      ))}
-                    </tr>
-                  )
-                })}
-
-                {technical.length > 0 && (
-                  <>
-                    <tr className="bg-gray-100">
-                      <td colSpan={products.length + 1} className="px-3 sm:px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
-                        Technical Specifications
-                      </td>
-                    </tr>
-
-                    {technical.map((key) => {
-                      const different = isDifferent(key, products)
-                      return (
-                        <tr 
-                          key={key} 
-                          className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
-                        >
-                          <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-gray-700 sticky left-0 bg-white z-10">
-                            <div className="flex items-center gap-2">
-                              {formatFieldName(key)}
-                              {different && (
-                                <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Different values"></span>
-                              )}
-                            </div>
-                          </td>
-                          {products.map((product: any, idx: number) => (
-                            <td 
-                              key={idx} 
-                              className={`px-3 sm:px-6 py-3 text-xs sm:text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
-                            >
-                              {formatValue(key, product[key]) || '-'}
-                            </td>
-                          ))}
-                        </tr>
-                      )
-                    })}
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="mt-4 flex items-center gap-2 text-xs sm:text-sm text-gray-600">
-          <span className="inline-block w-3 h-3 bg-yellow-50 border border-yellow-200 rounded flex-shrink-0"></span>
-          <span>Highlighted rows indicate differences between coating products</span>
-        </div>
-      </div>
-    )
-  }
-
-  const renderLookupSummary = () => {
-    if (!specificAnswer || comparisonData || analyticalData || metaQuestionData) return null
-
-    return (
-      <div className="mb-8">
-        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-4 sm:p-6">
-            <div className="flex items-start mb-4">
-              <div className="flex-shrink-0">
-                <svg className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-              </div>
-              <div className="ml-3 sm:ml-4 flex-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
-                <p className="text-green-700 text-xs sm:text-sm">
-                  Based on analysis of {specificAnswer.count} coating product(s)
-                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
-                </p>
-              </div>
-            </div>
-            
-            <div className="prose prose-green max-w-none text-sm sm:text-base">
-              <div 
-                className="text-gray-800 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(specificAnswer.summary, 'green') }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {specificAnswer.count > 0 && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center">
-                <svg className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-xs sm:text-sm font-medium text-blue-900">
-                  {specificAnswer.count} coating product reference{specificAnswer.count !== 1 ? 's' : ''} available below
                 </span>
               </div>
               <button
@@ -1061,20 +1183,28 @@ export default function CoatingsPage() {
 
       {!loading && !error && hasSearched && (
         <>
-          {/* 🎯 NEW: AI Summary Display (Shows FIRST) */}
-          {renderAISummary()}
-          
-          {/* Existing summary renderers */}
+          {/* ✅ RENDER ORDER: Show only ONE summary type */}
+          {/* 1. Meta Questions (highest priority) */}
           {renderMetaSummary()}
+          
+          {/* 2. Analytical Summary */}
           {renderAnalyticalSummary()}
-          {renderLookupSummary()}
+          
+          {/* 3. Comparison */}
           {renderComparison()}
+          
+          {/* 4. Specific Answer (via AI Summary) */}
+          {specificAnswer && renderAISummary()}
+          
+          {/* 5. General Lookup (only if none of the above) */}
+          {renderLookupSummary()}
 
+          {/* 6. Product Grid (always show if results exist and not comparison) */}
           {results.length > 0 && !comparisonData && (
             <div id="product-references" className="bg-white rounded-lg shadow-sm p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 gap-3">
                 <h2 className="text-xl sm:text-2xl font-bold" style={{ color: '#0078a9' }}>
-                  {analyticalData || metaQuestionData || aiAnswer ? 'Product References' : 'Search Results'}
+                  {analyticalData || metaQuestionData || specificAnswer ? 'Product References' : 'Search Results'}
                 </h2>
                 <div className="flex items-center gap-3 sm:gap-4">
                   {searchTime && (

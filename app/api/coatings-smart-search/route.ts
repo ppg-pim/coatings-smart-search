@@ -53,20 +53,16 @@ async function loadProductCache(): Promise<ProductCache> {
     console.log(`⚠️ Cache expired (age: ${Math.floor(cacheAge / 1000 / 60)} minutes)`)
   }
   
-  // ✅ FIXED: If already loading, wait for that load to complete
   if (cacheLoadingPromise) {
     console.log('⏳ Waiting for existing cache load...')
     return await cacheLoadingPromise
   }
   
-  // Start loading
   console.log('📋 Loading all product data from database...')
   const startTime = Date.now()
   
-  // ✅ FIXED: Create the promise immediately before any await
   cacheLoadingPromise = (async () => {
     try {
-      // ... rest of your loading code stays the same
       const { count: totalCount, error: countError } = await supabase
         .from('coatings')
         .select('*', { count: 'exact', head: true })
@@ -151,7 +147,6 @@ async function loadProductCache(): Promise<ProductCache> {
       return productCache
       
     } finally {
-      // ✅ FIXED: Always clear the loading promise
       cacheLoadingPromise = null
     }
   })()
@@ -193,13 +188,11 @@ async function semanticSearch(query: string, limit: number = 150): Promise<any[]
   console.log('🧠 Performing semantic search...')
   
   try {
-    // Generate embedding for the search query
     const queryEmbedding = await generateEmbedding(query)
     
-    // Search using vector similarity
     const { data, error } = await supabase.rpc('match_coatings', {
       query_embedding: queryEmbedding,
-      match_threshold: 0.65,  // Similarity threshold (0-1, lower = more results)
+      match_threshold: 0.65,
       match_count: limit
     })
     
@@ -210,7 +203,6 @@ async function semanticSearch(query: string, limit: number = 150): Promise<any[]
     
     console.log(`✅ Found ${data?.length || 0} semantically similar products`)
     
-    // Log top 5 results with similarity scores
     if (data && data.length > 0) {
       console.log('🏆 Top 5 semantic matches:')
       data.slice(0, 5).forEach((product: any, i: number) => {
@@ -430,6 +422,34 @@ const TERM_VARIATIONS: Record<string, string[]> = {
 // HELPER FUNCTIONS
 // ============================================================================
 
+function getComparedFields(products: ProductRecord[], onlyDifferences: boolean = false): string[] {
+  if (products.length === 0) return []
+  
+  const excludeFields = ['embedding', 'created_at', 'updated_at', '_relevanceScore', '_sourceTable', 'searchable_text', 'searchabletext']
+  
+  const allKeys = new Set<string>()
+  products.forEach(product => {
+    Object.keys(product).forEach(key => {
+      if (!excludeFields.includes(key.toLowerCase())) {
+        allKeys.add(key)
+      }
+    })
+  })
+  
+  const fields = Array.from(allKeys).sort()
+  
+  // ✅ If onlyDifferences is true, filter to show only fields with different values
+  if (onlyDifferences) {
+    return fields.filter(field => {
+      const values = products.map(p => p[field])
+      const uniqueValues = new Set(values.map(v => JSON.stringify(v)))
+      return uniqueValues.size > 1 // Only keep fields where values differ
+    })
+  }
+  
+  return fields
+}
+
 function detectMetaQuestion(query: string): { isMeta: boolean; type: string | null } {
   const lowerQuery = query.toLowerCase().trim()
   const hasSpecificProduct = /\b([a-z]{2,}\s*\d{3,}|[0-9][a-z0-9]{4,})\b/i.test(query)
@@ -476,7 +496,6 @@ async function handleMetaQuestion(type: string, query: string, filters: any): Pr
       try {
         console.log('📊 Counting products...')
         
-        // ✅ Get accurate count from database
         let countQuery = supabase
           .from('coatings')
           .select('*', { count: 'exact', head: true })
@@ -503,7 +522,6 @@ async function handleMetaQuestion(type: string, query: string, filters: any): Pr
         
         console.log(`✅ Total products: ${totalCount?.toLocaleString()}`)
         
-        // ✅ FIX: Use cache for accurate statistics instead of limited sample
         console.log('📊 Loading cache for accurate statistics...')
         const cache = await getCache()
         
@@ -513,7 +531,6 @@ async function handleMetaQuestion(type: string, query: string, filters: any): Pr
         console.log(`   - ${cache.productModels.length} unique product models`)
         console.log(`   - ${cache.skus.length} unique SKUs`)
         
-        // Fetch a small sample for display (200 products)
         console.log(`📊 Fetching 200 sample products for display...`)
         
         let sampleQuery = supabase
@@ -534,7 +551,6 @@ async function handleMetaQuestion(type: string, query: string, filters: any): Pr
         const cleanedSamples = (sampleData || []).map((p: any) => cleanProductData(p))
         console.log(`✅ Fetched ${cleanedSamples.length} sample products for display`)
         
-        // ✅ Generate AI summary using cache statistics
         const aiSummary = await generateCountSummary(
           totalCount || 0,
           cache,
@@ -542,33 +558,32 @@ async function handleMetaQuestion(type: string, query: string, filters: any): Pr
           query
         )
         
-		return {
-		  success: true,
-		  questionType: 'analytical',
-		  metaType: 'count',
-		  summary: aiSummary,
-		  aiAnswer: aiSummary,
-		  count: totalCount,
-		  results: cleanedSamples.slice(0, 50),
-		  totalResults: totalCount,
-		  displayedResults: Math.min(50, cleanedSamples.length),
-		  statistics: {
-			totalProducts: totalCount,
-			totalFamilies: cache.families.length,
-			totalProductTypes: cache.productTypes.length,
-			totalProductModels: cache.productModels.length,
-			totalSkus: cache.skus.length,
-			missingSkus: totalCount! - cache.skus.length
-		  },
-		  message: `Analysis based on ${totalCount?.toLocaleString()} total products`
-		}
+        return {
+          success: true,
+          questionType: 'analytical',
+          metaType: 'count',
+          summary: aiSummary,
+          aiAnswer: aiSummary,
+          count: totalCount,
+          results: cleanedSamples.slice(0, 50),
+          totalResults: totalCount,
+          displayedResults: Math.min(50, cleanedSamples.length),
+          statistics: {
+            totalProducts: totalCount,
+            totalFamilies: cache.families.length,
+            totalProductTypes: cache.productTypes.length,
+            totalProductModels: cache.productModels.length,
+            totalSkus: cache.skus.length,
+            missingSkus: totalCount! - cache.skus.length
+          },
+          message: `Analysis based on ${totalCount?.toLocaleString()} total products`
+        }
       } catch (error: any) {
         console.error('❌ Count error:', error)
         throw error
       }
     }
     
-    // Handle other meta-question types
     if (type === 'list') {
       console.log('📋 Handling list query...')
       
@@ -645,7 +660,6 @@ async function generateCountSummary(
   query: string
 ): Promise<string> {
   try {
-    // Use cache for accurate statistics
     const familyList = cache.families.slice(0, 20)
     const typeList = cache.productTypes.slice(0, 20)
     
@@ -656,7 +670,6 @@ async function generateCountSummary(
     console.log(`   - ${cache.productModels.length} unique product models`)
     console.log(`   - ${cache.skus.length} unique SKUs (non-null)`)
     
-    // ✅ Calculate missing SKUs
     const missingSkus = count - cache.skus.length
     const skuCoverage = ((cache.skus.length / count) * 100).toFixed(1)
     
@@ -716,14 +729,12 @@ async function analyzeSKUs(query: string): Promise<any> {
     const checkMissing = /missing|null|empty|blank|without/i.test(lowerQuery)
     const checkDuplicate = /duplicate|duplicated|repeated/i.test(lowerQuery)
     
-    // Fetch all products with SKU data
     const { count: totalCount } = await supabase
       .from('coatings')
       .select('*', { count: 'exact', head: true })
     
     console.log(`📊 Total products: ${totalCount}`)
     
-    // Fetch all SKUs in batches
     const BATCH_SIZE = 1000
     const totalBatches = Math.ceil((totalCount || 0) / BATCH_SIZE)
     
@@ -749,11 +760,9 @@ async function analyzeSKUs(query: string): Promise<any> {
         data.forEach(product => {
           allProducts.push(product)
           
-          // Track missing SKUs
           if (!product.sku || product.sku.trim() === '') {
             missingSkuProducts.push(product)
           } else {
-            // Track SKU occurrences for duplicate detection
             const sku = product.sku.trim()
             if (!skuMap.has(sku)) {
               skuMap.set(sku, [])
@@ -768,7 +777,6 @@ async function analyzeSKUs(query: string): Promise<any> {
       }
     }
     
-    // Find duplicate SKUs (SKUs that appear more than once)
     const duplicateSkus = Array.from(skuMap.entries())
       .filter(([sku, products]) => products.length > 1)
       .map(([sku, products]) => ({
@@ -782,7 +790,6 @@ async function analyzeSKUs(query: string): Promise<any> {
     console.log(`   - Missing SKUs: ${missingSkuProducts.length}`)
     console.log(`   - Duplicate SKUs: ${duplicateSkus.length}`)
     
-    // Build results based on query
     let results: any[] = []
     let summaryParts: string[] = []
     
@@ -796,7 +803,6 @@ async function analyzeSKUs(query: string): Promise<any> {
     }
     
     if (checkDuplicate && duplicateSkus.length > 0) {
-      // Flatten duplicate products for results
       duplicateSkus.slice(0, 20).forEach(({ sku, products }) => {
         results.push(...products)
       })
@@ -812,7 +818,6 @@ async function analyzeSKUs(query: string): Promise<any> {
       }${duplicateSkus.length > 10 ? `\n\n_...and ${duplicateSkus.length - 10} more duplicate SKUs_` : ''}`)
     }
     
-    // If no issues found
     if (summaryParts.length === 0) {
       summaryParts.push(`**SKU Analysis Results**\n\n✅ **No issues found!**\n\n- Total products: ${allProducts.length.toLocaleString()}\n- Products with missing SKUs: ${missingSkuProducts.length}\n- Duplicate SKUs: ${duplicateSkus.length}\n\nAll products have valid, unique SKUs.`)
     }
@@ -870,7 +875,19 @@ function extractComparisonProducts(query: string): ComparisonExtraction {
   console.log('🎯 Detected comparison query')
   
   const potentialSkus: string[] = []
+  const productCodes: string[] = []
   
+  // ✅ IMPROVED: Better pattern for product codes like 020X411
+  const productCodePattern = /\b(\d{3}[A-Z]\d{3})\b/gi
+  let match
+  
+  while ((match = productCodePattern.exec(query)) !== null) {
+    const code = match[1].toUpperCase()
+    productCodes.push(code)
+    console.log(`  📦 Found product code: ${code}`)
+  }
+  
+  // Also check for SKU patterns
   const skuPattern1 = /\b([A-Z0-9]{4,}[\/\-][A-Z0-9]{2,}[A-Z0-9]{3,})\b/gi
   let skuMatch1
   while ((skuMatch1 = skuPattern1.exec(query)) !== null) {
@@ -878,38 +895,12 @@ function extractComparisonProducts(query: string): ComparisonExtraction {
     console.log(`  📦 Found potential SKU: ${skuMatch1[1]}`)
   }
   
-  const skuPattern2 = /\b([0-9]{4}[A-Z0-9]{8,})\b/gi
-  let skuMatch2
-  while ((skuMatch2 = skuPattern2.exec(query)) !== null) {
-    if (!potentialSkus.includes(skuMatch2[1])) {
-      potentialSkus.push(skuMatch2[1])
-      console.log(`  📦 Found potential SKU: ${skuMatch2[1]}`)
-    }
-  }
-  
-  const productCodePattern = /\b([a-z]{2,})\s*(\d{3,4})([a-z]*)\b/gi
-  const productCodes: string[] = []
-  
-  let match
-  while ((match = productCodePattern.exec(query)) !== null) {
-    const prefix = match[1].toUpperCase()
-    const number = match[2]
-    const suffix = match[3].toUpperCase()
-    
-    const fullCode = `${prefix}${number}${suffix}`
-    
-    if (!productCodes.includes(fullCode)) {
-      productCodes.push(fullCode)
-      console.log(`  📋 Found product code: ${fullCode}`)
-    }
-  }
-  
-  if (potentialSkus.length > 0) {
-    console.log(`  ✅ Detected raw SKU comparison: ${potentialSkus.length} SKUs`)
-  }
+  console.log(`🔍 Comparison detection summary:`)
+  console.log(`   - Product codes found: ${productCodes.length} [${productCodes.join(', ')}]`)
+  console.log(`   - Potential SKUs found: ${potentialSkus.length} [${potentialSkus.join(', ')}]`)
   
   return {
-    isComparison,
+    isComparison: true,
     productCodes,
     potentialSkus
   }
@@ -1002,32 +993,83 @@ function expandSearchTerms(query: string): string[] {
   return finalTerms
 }
 
-type SearchIntent = 'comparison' | 'product_code' | 'product_type' | 'application' | 'general'
-
-function detectSearchIntent(query: string): { intent: SearchIntent; confidence: number } {
-  const lower = query.toLowerCase()
+function classifyIntent(query: string): {
+  intent: 'specific' | 'comparison' | 'analytical' | 'meta' | 'general'
+  confidence: number
+} {
+  const queryLower = query.toLowerCase()
   
-  if (/\b(compare|vs|versus|difference\s+between)\b/i.test(query)) {
-    return { intent: 'comparison', confidence: 0.95 }
+  // 1. Check for specific product lookup (SKU or exact product code)
+  // Pattern: alphanumeric codes like "020X411", "CA7233", "99-36270"
+  const productCodePattern = /\b[a-z0-9]{2,}[-\s]?[0-9]{3,}[a-z0-9]*\b/i
+  const isProductCode = productCodePattern.test(query)
+  
+  // Also check if query matches a known family exactly
+  const cache = productCache
+  if (cache) {
+    const queryUpper = query.toUpperCase().trim()
+    const exactFamilyMatch = cache.families.some(f => 
+      f.toUpperCase() === queryUpper
+    )
+    
+    if (exactFamilyMatch || isProductCode) {
+      console.log('🎯 Detected as SPECIFIC product lookup')
+      return { intent: 'specific', confidence: 0.95 }
+    }
   }
   
-  if (/\b[A-Z0-9]{3,}[\s\-]+[A-Z0-9]+\b/i.test(query)) {
-    return { intent: 'product_code', confidence: 0.9 }
+  // 2. Check for comparison intent
+  const comparisonKeywords = [
+    'compare', 'comparison', 'versus', 'vs', 'difference between',
+    'better than', 'which is better', 'or', 'between'
+  ]
+  
+  const hasComparisonKeyword = comparisonKeywords.some(keyword => 
+    queryLower.includes(keyword)
+  )
+  
+  // Count "or" and product-like terms to detect comparison
+  const orCount = (queryLower.match(/\bor\b/g) || []).length
+  const hasMultipleProducts = orCount > 0 || 
+    (queryLower.match(/\b[a-z0-9]{2,}[-\s]?[0-9]{3,}/gi) || []).length > 1
+  
+  if (hasComparisonKeyword || (orCount > 0 && hasMultipleProducts)) {
+    console.log('🎯 Detected as COMPARISON query')
+    return { intent: 'comparison', confidence: 0.9 }
   }
   
-  if (/\b(primers?|coatings?|topcoats?|epoxy|polyurethane)\b/i.test(lower) && 
-      !/\b[a-z]{2,}\s*\d{3,}/i.test(lower)) {
-    return { intent: 'product_type', confidence: 0.9 }
+  // 3. Check for analytical intent
+  const analyticalKeywords = [
+    'how many', 'count', 'list all', 'show all', 'what are all',
+    'which products', 'available', 'options', 'types of'
+  ]
+  
+  const hasAnalyticalKeyword = analyticalKeywords.some(keyword =>
+    queryLower.includes(keyword)
+  )
+  
+  if (hasAnalyticalKeyword) {
+    console.log('🎯 Detected as ANALYTICAL query')
+    return { intent: 'analytical', confidence: 0.85 }
   }
   
-  if (/\b[a-z]{2,}\s*\d{3,}/i.test(lower)) {
-    return { intent: 'product_code', confidence: 0.95 }
+  // 4. Check for meta questions (about the system/database)
+  const metaKeywords = [
+    'what is', 'what are', 'tell me about', 'explain',
+    'how does', 'what does', 'definition', 'meaning'
+  ]
+  
+  const hasMetaKeyword = metaKeywords.some(keyword =>
+    queryLower.includes(keyword)
+  )
+  
+  if (hasMetaKeyword && !isProductCode) {
+    console.log('🎯 Detected as META question')
+    return { intent: 'meta', confidence: 0.8 }
   }
   
-  if (/\b(for|used in|used for|application)\b/i.test(lower)) {
-    return { intent: 'application', confidence: 0.85 }
-  }
-  
+  // 5. Default to general search
+  console.log('🎯 Detected as GENERAL search')
   return { intent: 'general', confidence: 0.5 }
 }
 
@@ -1099,7 +1141,6 @@ function scoreProductRelevance(product: ProductRecord, keywords: string[], debug
   
   const primaryKeywords = singleWords.filter(k => !genericTerms.includes(k.toLowerCase()))
   
-  // Only log for first product (debug mode)
   if (debug) {
     console.log(`  🔍 Detected phrases:`, phrases)
     console.log(`  🔍 Primary keywords for scoring:`, primaryKeywords)
@@ -1327,62 +1368,427 @@ ${productsData}`
   }
 }
 
+// Helper function to format attribute names nicely
+function formatAttributeName(attr: string): string {
+  return attr
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
 async function generateComparisonAnalysis(products: ProductRecord[], query: string): Promise<string> {
   try {
-    const comparisonTable = buildComparisonTable(products)
+    const excludeFields = ['embedding', 'created_at', 'updated_at', '_relevanceScore', '_sourceTable', 'searchable_text', 'searchabletext']
     
-    const productsData = products.slice(0, 10).map(p => {
-      const essential = {
-        Product_Name: p.Product_Name,
-        sku: p.sku,
-        family: p.family,
-        Product_Type: p.Product_Type,
-        Product_Model: p.Product_Model
+    const allAttributes = new Set<string>()
+    products.forEach(product => {
+      Object.keys(product).forEach(key => {
+        if (!excludeFields.includes(key.toLowerCase()) && product[key] !== null && product[key] !== undefined) {
+          allAttributes.add(key)
+        }
+      })
+    })
+    
+    const comparisonData = Array.from(allAttributes).map(attr => {
+      const values = products.map(p => p[attr])
+      const allSame = values.every(v => v === values[0])
+      
+      return {
+        attribute: attr,
+        values: values,
+        differs: !allSame
       }
-      return JSON.stringify(essential)
+    })
+    
+    const differingAttrs = comparisonData.filter(item => item.differs)
+    const sameAttrs = comparisonData.filter(item => !item.differs)
+    
+    console.log(`📊 Comparison stats: ${differingAttrs.length} differing attributes, ${sameAttrs.length} same attributes`)
+    
+    const productSummaries = products.map((product, idx) => {
+      const name = product.Product_Name || product.family || `Product ${idx + 1}`
+      const sku = product.sku || 'N/A'
+      const family = product.family || 'N/A'
+      
+      return `**Product ${idx + 1}: ${name}**\n- SKU: ${sku}\n- Family: ${family}`
     }).join('\n\n')
     
-    console.log(`🤖 Generating comparison analysis for ${products.length} products`)
+    const differencesSection = differingAttrs.length > 0 ? 
+      `\n\n### Key Differences (${differingAttrs.length} attributes differ)\n\n` +
+      differingAttrs.slice(0, 20).map(item => {
+        const attrName = formatAttributeName(item.attribute)
+        const valueComparison = products.map((p, idx) => 
+          `  - **Product ${idx + 1}:** ${item.values[idx] || 'N/A'}`
+        ).join('\n')
+        
+        return `**${attrName}:**\n${valueComparison}`
+      }).join('\n\n')
+      : '\n\n*No differences found - products are identical.*'
     
+    const similaritiesSection = sameAttrs.length > 0 ?
+      `\n\n### Similarities (${sameAttrs.length} attributes are the same)\n\n` +
+      sameAttrs.slice(0, 15).map(item => 
+        `- **${formatAttributeName(item.attribute)}:** ${item.values[0] || 'N/A'}`
+      ).join('\n') +
+      (sameAttrs.length > 15 ? `\n- *...and ${sameAttrs.length - 15} more shared attributes*` : '')
+      : ''
+
+    const prompt = `You are comparing ${products.length} coating products. Provide a comprehensive technical comparison.
+
+${productSummaries}
+
+${differencesSection}
+
+${similaritiesSection}
+
+Please provide a detailed analysis with these sections:
+
+1. **Overview**: Brief summary of what these products are and their primary purpose
+2. **Critical Differences**: Highlight the 10-15 most important technical differences that would affect product selection
+3. **Performance Characteristics**: Compare key performance attributes (if available)
+4. **Application Recommendations**: When to use each product based on the differences
+5. **Summary**: Quick decision guide
+
+Format your response in clear markdown with bullet points. Focus on technical specifications and practical differences.`
+
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are an expert aerospace coatings consultant. Provide a detailed comparison.
-
-**PRE-FORMATTED TABLE:**
-${comparisonTable}
-
-**YOUR TASK:**
-1. Write a brief overview (2-3 sentences)
-2. **INCLUDE THE TABLE ABOVE** under "## Key Specifications"
-3. Add "## Key Differences" with bullet points
-4. Add "## Recommendations"
-
-**PRODUCTS (${products.length} total):**
-${productsData}`
+          content: 'You are a technical product comparison expert specializing in industrial coatings. Provide detailed, accurate comparisons focusing on specifications and practical differences. Always include comprehensive technical details and explain what the differences mean for end users.'
         },
         {
           role: 'user',
-          content: query
+          content: prompt
         }
       ],
       temperature: 0.3,
-      max_tokens: 1500
+      max_tokens: 3000
     })
+
+    const analysis = completion.choices[0]?.message?.content || 'Unable to generate comparison analysis.'
     
-    let analysis = stripHtml(completion.choices[0].message.content || 'Unable to generate comparison')
-    
-    if (!analysis.includes('| Specification |')) {
-      analysis = `${analysis}\n\n${comparisonTable}`
-    }
+    console.log(`✅ Generated comparison analysis (${analysis.length} characters)`)
     
     return analysis
-  } catch (error: any) {
-    console.error('❌ Comparison error:', error.message)
-    const table = buildComparisonTable(products)
-    return `# Product Comparison\n\n${table}\n\n*Detailed analysis unavailable.*`
+
+  } catch (error) {
+    console.error('❌ Error generating comparison analysis:', error)
+    return `**Comparison Analysis**\n\nComparing ${products.length} products:\n\n${
+      products.map((p, i) => `${i + 1}. ${p.Product_Name || p.family || 'Unknown'} (SKU: ${p.sku || 'N/A'})`).join('\n')
+    }\n\n*Detailed analysis unavailable.*`
+  }
+}
+
+// ============================================================================
+// COMPARISON QUERY HANDLERS
+// ============================================================================
+
+async function handleComparisonQuery(query: string, productCodes: string[]): Promise<NextResponse> {
+  console.log('🎯 Processing comparison query for:', productCodes)
+  
+  try {
+    const cache = await getCache()
+    console.log('✅ Cache loaded for comparison')
+    
+    const matchedProducts: ProductRecord[] = []
+    const notFoundCodes: string[] = []
+    
+    for (const code of productCodes) {
+      console.log(`  🔎 Searching for: ${code}`)
+      
+      let found = false
+      
+      // ============================================================================
+      // METHOD 1: Exact Family Match
+      // ============================================================================
+      const familyMatches = cache.families.filter(f => {
+        const fUpper = f.toUpperCase()
+        const codeUpper = code.toUpperCase()
+        const fClean = fUpper.replace(/[\s\-\/®™©]/g, '')
+        const codeClean = codeUpper.replace(/[\s\-\/®™©]/g, '')
+        return fClean === codeClean || fClean.includes(codeClean) || codeClean.includes(fClean)
+      })
+      
+      console.log(`  📋 Found ${familyMatches.length} family matches for ${code}:`, familyMatches.slice(0, 5))
+      
+      if (familyMatches.length > 0) {
+        const { data, error } = await supabase
+          .from('coatings')
+          .select('*')
+          .eq('family', familyMatches[0])
+          .limit(1)
+        
+        if (!error && data && data.length > 0) {
+          console.log(`  ✅ Found product for ${code}: ${data[0].Product_Name || data[0].family}`)
+          matchedProducts.push(cleanProductData(data[0]))
+          found = true
+          continue
+        }
+      }
+      
+      // ============================================================================
+      // METHOD 2: Fuzzy Family Match (for codes like 020X456 that don't exist)
+      // ============================================================================
+      if (!found) {
+        console.log(`  🔍 Trying fuzzy family match for ${code}...`)
+        
+        // Extract pattern: e.g., "020X456" -> "020X" prefix, "456" number
+        const patternMatch = code.match(/^([A-Z0-9]{3,5})([0-9]{2,4})([A-Z]*)$/i)
+        
+        if (patternMatch) {
+          const prefix = patternMatch[1].toUpperCase()
+          const number = patternMatch[2]
+          const suffix = patternMatch[3].toUpperCase()
+          
+          console.log(`  🔍 Pattern: prefix="${prefix}", number="${number}", suffix="${suffix}"`)
+          
+          // Find families with same prefix
+          const similarFamilies = cache.families.filter(f => {
+            const fUpper = f.toUpperCase().replace(/[\s\-\/®™©]/g, '')
+            return fUpper.startsWith(prefix)
+          })
+          
+          console.log(`  📋 Found ${similarFamilies.length} families with prefix "${prefix}":`, similarFamilies.slice(0, 10))
+          
+          if (similarFamilies.length > 0) {
+            // Try to find closest match by number
+            const codeNumber = parseInt(number)
+            let closestFamily = similarFamilies[0]
+            let smallestDiff = Infinity
+            
+            similarFamilies.forEach(f => {
+              const fMatch = f.match(/(\d{2,4})/)
+              if (fMatch) {
+                const fNumber = parseInt(fMatch[1])
+                const diff = Math.abs(fNumber - codeNumber)
+                if (diff < smallestDiff) {
+                  smallestDiff = diff
+                  closestFamily = f
+                }
+              }
+            })
+            
+            console.log(`  🎯 Closest family match: "${closestFamily}" (diff: ${smallestDiff})`)
+            
+            const { data, error } = await supabase
+              .from('coatings')
+              .select('*')
+              .eq('family', closestFamily)
+              .limit(1)
+            
+            if (!error && data && data.length > 0) {
+              console.log(`  ✅ Found similar product for ${code}: ${data[0].Product_Name || data[0].family}`)
+              console.log(`  ℹ️ Note: Using "${closestFamily}" as substitute for "${code}"`)
+              matchedProducts.push(cleanProductData(data[0]))
+              found = true
+              continue
+            }
+          }
+        }
+      }
+      
+      // ============================================================================
+      // METHOD 3: SKU Match
+      // ============================================================================
+      if (!found) {
+        console.log(`  🔍 Trying SKU match for ${code}...`)
+        
+        const skuMatches = cache.skus.filter(s => 
+          s.toUpperCase().includes(code.toUpperCase()) ||
+          code.toUpperCase().includes(s.toUpperCase())
+        )
+        
+        if (skuMatches.length > 0) {
+          console.log(`  📋 Found ${skuMatches.length} SKU matches:`, skuMatches.slice(0, 5))
+          
+          const { data, error } = await supabase
+            .from('coatings')
+            .select('*')
+            .eq('sku', skuMatches[0])
+            .limit(1)
+          
+          if (!error && data && data.length > 0) {
+            console.log(`  ✅ Found product by SKU for ${code}: ${data[0].Product_Name || data[0].family}`)
+            matchedProducts.push(cleanProductData(data[0]))
+            found = true
+            continue
+          }
+        }
+      }
+      
+      // ============================================================================
+      // METHOD 4: Product_Name Search
+      // ============================================================================
+      if (!found) {
+        console.log(`  🔍 Trying Product_Name search for ${code}...`)
+        
+        const { data, error } = await supabase
+          .from('coatings')
+          .select('*')
+          .ilike('Product_Name', `%${code}%`)
+          .limit(1)
+        
+        if (!error && data && data.length > 0) {
+          console.log(`  ✅ Found product by name for ${code}: ${data[0].Product_Name}`)
+          matchedProducts.push(cleanProductData(data[0]))
+          found = true
+          continue
+        }
+      }
+      
+      // ============================================================================
+      // NOT FOUND
+      // ============================================================================
+      if (!found) {
+        console.log(`  ❌ No match found for ${code}`)
+        notFoundCodes.push(code)
+      }
+    }
+    
+    console.log(`✅ Total matched products: ${matchedProducts.length}`)
+    console.log(`❌ Not found: ${notFoundCodes.length}`, notFoundCodes)
+    
+    // ============================================================================
+    // RETURN RESULTS
+    // ============================================================================
+    
+    if (matchedProducts.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: `Could not find any products to compare. None of the requested products were found: ${productCodes.join(', ')}`,
+        notFound: notFoundCodes,
+        results: []
+      })
+    }
+    
+    if (matchedProducts.length === 1) {
+      console.log('⚠️ Only found 1 product - suggesting similar products')
+      
+      // Get similar products from the same family or type
+      const foundProduct = matchedProducts[0]
+      const family = foundProduct.family
+      const productType = foundProduct.Product_Type
+      
+      console.log(`  🔍 Looking for similar products to ${foundProduct.Product_Name}`)
+      console.log(`  📋 Family: ${family}, Type: ${productType}`)
+      
+      // Find similar products
+      let similarQuery = supabase
+        .from('coatings')
+        .select('*')
+        .limit(5)
+      
+      if (family) {
+        similarQuery = similarQuery.eq('family', family)
+      } else if (productType) {
+        similarQuery = similarQuery.eq('Product_Type', productType)
+      }
+      
+      const { data: similarProducts } = await similarQuery
+      
+      if (similarProducts && similarProducts.length > 1) {
+        const cleanedSimilar = similarProducts.slice(0, 2).map(cleanProductData)
+        matchedProducts.push(...cleanedSimilar.filter(p => p.sku !== foundProduct.sku))
+        
+        console.log(`  ✅ Added ${matchedProducts.length - 1} similar products for comparison`)
+      }
+    }
+    
+    if (matchedProducts.length < 2) {
+      return NextResponse.json({
+        success: false,
+        error: `Could not find enough products to compare. Found ${matchedProducts.length} of ${productCodes.length} requested.`,
+        notFound: notFoundCodes,
+        results: matchedProducts,
+        suggestion: matchedProducts.length === 1 
+          ? `We found "${matchedProducts[0].Product_Name}" but couldn't find "${notFoundCodes[0]}". Try searching for similar product codes.`
+          : undefined
+      })
+    }
+    
+	console.log('🤖 Generating comparison analysis...')
+	
+	const comparisonAnalysis = await generateComparisonAnalysis(matchedProducts, query)
+
+	// ✅ UPDATED: Provide both full fields and difference-only fields
+	return NextResponse.json({
+	  success: true,
+	  questionType: 'comparison',
+	  intent: 'comparison',
+	  comparison: {
+		products: matchedProducts,
+		summary: comparisonAnalysis,
+		comparedFields: getComparedFields(matchedProducts, true), 
+		allFields: getComparedFields(matchedProducts, false)        
+	  },
+	  results: matchedProducts,
+	  aiAnswer: comparisonAnalysis,
+	  notFound: notFoundCodes.length > 0 ? notFoundCodes : undefined,
+	  warning: notFoundCodes.length > 0 
+		? `Note: Could not find exact matches for: ${notFoundCodes.join(', ')}. Showing similar products instead.`
+		: undefined
+	})
+    
+  } catch (error) {
+    console.error('❌ Error in comparison handler:', error)
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to generate comparison',
+      results: []
+    }, { status: 500 })
+  }
+}
+
+async function handleSKUComparisonQuery(query: string, skus: string[]): Promise<NextResponse> {
+  console.log('🎯 Processing SKU comparison for:', skus)
+  
+  try {
+    const matchedProducts: ProductRecord[] = []
+    
+    for (const sku of skus) {
+      const { data, error } = await supabase
+        .from('coatings')
+        .select('*')
+        .eq('sku', sku)
+        .limit(1)
+      
+      if (!error && data && data.length > 0) {
+        console.log(`  ✅ Found product for SKU ${sku}`)
+        matchedProducts.push(cleanProductData(data[0]))
+      }
+    }
+    
+    if (matchedProducts.length < 2) {
+      return NextResponse.json({
+        success: false,
+        error: `Could not find enough products to compare. Found ${matchedProducts.length} of ${skus.length} requested.`,
+        results: matchedProducts
+      })
+    }
+    
+    const comparisonAnalysis = await generateComparisonAnalysis(matchedProducts, query)
+    
+    return NextResponse.json({
+      success: true,
+      questionType: 'comparison',
+      intent: 'comparison',
+      comparison: {
+        products: matchedProducts,
+        summary: comparisonAnalysis,
+        comparedFields: getComparedFields(matchedProducts)
+      },
+      results: matchedProducts,
+      aiAnswer: comparisonAnalysis
+    })
+    
+  } catch (error) {
+    console.error('❌ Error in SKU comparison handler:', error)
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to generate comparison',
+      results: []
+    })
   }
 }
 
@@ -1393,7 +1799,6 @@ ${productsData}`
 function diversifyByFamily(products: any[], maxPerFamily: number = Infinity, maxTotal: number = 500): any[] {
   const familyGroups = new Map<string, any[]>()
   
-  // Group products by family
   products.forEach(product => {
     const family = (product.family || 'UNKNOWN').toUpperCase()
     if (!familyGroups.has(family)) {
@@ -1409,7 +1814,6 @@ function diversifyByFamily(products: any[], maxPerFamily: number = Infinity, max
   const familyCounters = new Map<string, number>()
   familyNames.forEach(f => familyCounters.set(f, 0))
   
-  // ✅ PHASE 1: Round-robin - Take 1 product from each family
   let roundNumber = 0
   const minPerFamily = 1
   
@@ -1433,7 +1837,6 @@ function diversifyByFamily(products: any[], maxPerFamily: number = Infinity, max
     if (!addedInRound) break
   }
   
-  // ✅ PHASE 2: Continue round-robin until maxTotal or all products exhausted
   while (diversified.length < maxTotal) {
     let addedInRound = false
     
@@ -1450,13 +1853,12 @@ function diversifyByFamily(products: any[], maxPerFamily: number = Infinity, max
       }
     }
     
-    if (!addedInRound) break // All families exhausted
+    if (!addedInRound) break
   }
   
   console.log(`✅ Diversified to ${diversified.length} products (round-robin across ALL families)`)
   console.log(`📊 Products per family:`)
   
-  // Show distribution
   const distribution = Array.from(familyCounters.entries())
     .filter(([_, count]) => count > 0)
     .sort((a, b) => b[1] - a[1])
@@ -1479,7 +1881,6 @@ function diversifyByFamily(products: any[], maxPerFamily: number = Infinity, max
 async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
   console.log(`\n📋 Getting filter options (forceRefresh: ${forceRefresh})`)
 
-  // Check cache first (unless force refresh)
   if (!forceRefresh && filterCache) {
     const now = Date.now()
     const cacheAge = now - filterCache.timestamp
@@ -1519,7 +1920,6 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
     
     console.log(`📊 Total rows in database: ${totalCount}`)
     
-    // Fetch ALL data in batches
     const BATCH_SIZE = 1000
     const totalBatches = Math.ceil((totalCount || 0) / BATCH_SIZE)
     
@@ -1560,12 +1960,10 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
           .range(from, to)
       ])
 
-      // Check for errors
       if (familiesResult.error) throw new Error(`Families: ${familiesResult.error.message}`)
       if (typesResult.error) throw new Error(`Types: ${typesResult.error.message}`)
       if (modelsResult.error) throw new Error(`Models: ${modelsResult.error.message}`)
 
-      // Collect data
       allFamilies.push(...(familiesResult.data?.map(r => r.family).filter(v => v && v.trim()) || []))
       allTypes.push(...(typesResult.data?.map(r => r.Product_Type).filter(v => v && v.trim()) || []))
       allModels.push(...(modelsResult.data?.map(r => r.Product_Model).filter(v => v && v.trim()) || []))
@@ -1576,12 +1974,10 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
     console.log(`   - Types: ${allTypes.length} values`)
     console.log(`   - Models: ${allModels.length} values`)
 
-    // Extract unique values using Set
     const families = [...new Set(allFamilies)].sort()
     const productTypes = [...new Set(allTypes)].sort()
     const productModels = [...new Set(allModels)].sort()
 
-    // Update cache
     filterCache = {
       families,
       productTypes,
@@ -1596,7 +1992,6 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
     console.log(`   🏷️  Product Types: ${productTypes.length}`)
     console.log(`   📦 Product Models: ${productModels.length}`)
     
-    // Show samples
     if (families.length > 0) {
       console.log(`   Sample families (first 10):`, families.slice(0, 10))
     }
@@ -1615,7 +2010,6 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
   } catch (error: any) {
     console.error('❌ Error fetching filter options:', error)
 
-    // If we have expired cache, return it as fallback
     if (filterCache) {
       console.log('⚠️ Returning expired cache as fallback')
       return {
@@ -1631,7 +2025,6 @@ async function getFilterOptions(forceRefresh: boolean = false): Promise<any> {
       }
     }
 
-    // Return empty arrays if no cache available
     return {
       success: false,
       error: error.message || 'Failed to fetch filter options',
@@ -1655,7 +2048,6 @@ export async function POST(request: NextRequest) {
 
     console.log('📥 Request:', { query, filters, getFilterOptions: shouldGetFilters })
 
-    // Cache refresh endpoint
     if (query === '__REFRESH_CACHE__') {
       await refreshCache()
       return NextResponse.json({
@@ -1665,7 +2057,6 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Filter options handler
     if (shouldGetFilters === true || query === '__GET_FILTER_OPTIONS__') {
       console.log('📊 Filter options requested')
       
@@ -1695,7 +2086,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate query for search requests
     if (!query || typeof query !== 'string' || !query.trim()) {
       return NextResponse.json({ 
         success: false,
@@ -1707,218 +2097,83 @@ export async function POST(request: NextRequest) {
     console.log('🔍 Search Query:', query)
     console.log('='.repeat(80))
 
-    // ✅ Add SKU analysis detection BEFORE other checks
+    // ============================================================================
+    // STEP 0: SKU ANALYSIS & META QUESTIONS
+    // ============================================================================
+
     if (detectSKUAnalysisQuery(query)) {
       console.log('🎯 Detected SKU analysis query')
       const result = await analyzeSKUs(query)
       return NextResponse.json(result)
     }
-    
-    // Check for meta-questions first
-	const metaQuestion = detectMetaQuestion(query)
-	if (metaQuestion.isMeta && metaQuestion.type) {
-	  console.log(`🎯 Detected meta-question type: ${metaQuestion.type}`)
-	  const result = await handleMetaQuestion(metaQuestion.type, query, filters)
-	  if (result) {
-		return NextResponse.json(result)
-	  }
-	}
-	
-    // Handle meta questions
-    const metaCheck = detectMetaQuestion(query)
-    if (metaCheck.isMeta && metaCheck.type) {
-      console.log(`🎯 Detected meta-question type: ${metaCheck.type}`)
-      const metaResult = await handleMetaQuestion(metaCheck.type, query, filters)
-      if (metaResult) {
-        return NextResponse.json(metaResult)
+
+    const metaQuestion = detectMetaQuestion(query)
+    if (metaQuestion.isMeta && metaQuestion.type) {
+      console.log(`🎯 Detected meta-question type: ${metaQuestion.type}`)
+      const result = await handleMetaQuestion(metaQuestion.type, query, filters)
+      if (result) {
+        return NextResponse.json(result)
       }
     }
-    
+
+    // ============================================================================
+    // STEP 1: INITIALIZE SEARCH VARIABLES
+    // ============================================================================
+
     const comparison = extractComparisonProducts(query)
-    
-    // ============================================================================
-    // HANDLE COMPARISON QUERIES
-    // ============================================================================
+    const intent = classifyIntent(query)
+    const expandedTerms = expandSearchTerms(query)
 
-    if (comparison.isComparison && comparison.potentialSkus && comparison.potentialSkus.length >= 2) {
-      console.log('🎯 Processing raw SKU comparison for:', comparison.potentialSkus)
-      
-      const productMatches = await Promise.all(
-        comparison.potentialSkus.map(async (sku) => {
-          console.log(`  🔍 Searching for SKU: ${sku}`)
-          
-          const { data, error } = await supabase
-            .from('coatings')
-            .select('*')
-            .eq('sku', sku)
-            .limit(1)
-          
-          if (error) {
-            console.error(`  ❌ Database error for SKU ${sku}:`, error)
-            return { sku, products: [] }
-          }
-          
-          if (data && data.length > 0) {
-            console.log(`  ✅ Found product for SKU ${sku}: ${data[0].Product_Name}`)
-            return { sku, products: [data[0]] }
-          }
-          
-          console.log(`  ❌ No product found for SKU ${sku}`)
-          return { sku, products: [] }
-        })
-      )
-      
-      const allMatchedProducts: ProductRecord[] = []
-      const notFound: string[] = []
-      
-      productMatches.forEach(match => {
-        if (match.products.length > 0) {
-          allMatchedProducts.push(cleanProductData(match.products[0]))
-          console.log(`  ✅ Added SKU ${match.sku}: ${match.products[0].Product_Name}`)
-        } else {
-          notFound.push(match.sku)
-          console.log(`  ❌ No match for SKU ${match.sku}`)
-        }
-      })
-      
-      console.log(`✅ Total matched products: ${allMatchedProducts.length}`)
-      
-      if (allMatchedProducts.length < 2) {
-        return NextResponse.json({
-          success: false,
-          error: `Could not find enough products to compare. Found ${allMatchedProducts.length} of ${comparison.potentialSkus.length} requested.`,
-          results: allMatchedProducts,
-          count: allMatchedProducts.length,
-          notFound: notFound.length > 0 ? notFound : undefined
-        })
-      }
-      
-      const analysis = await generateComparisonAnalysis(allMatchedProducts, query)
-      
-      return NextResponse.json({
-        success: true,
-        questionType: 'comparison',
-        summary: analysis,
-        aiAnswer: analysis,
-        results: allMatchedProducts,
-        count: allMatchedProducts.length,
-        notFound: notFound.length > 0 ? notFound : undefined
-      })
-    }
-
-    if (comparison.isComparison && comparison.productCodes.length >= 2) {
-      console.log('🎯 Processing comparison query for:', comparison.productCodes)
-      
-      const cache = await getCache()
-      console.log('✅ Cache loaded for comparison')
-      
-      const productMatches = await Promise.all(
-        comparison.productCodes.map(async (code) => {
-          console.log(`  🔎 Searching for: ${code}`)
-          
-          const familyMatches = cache.families.filter(f => {
-            const fUpper = f.toUpperCase()
-            const codeUpper = code.toUpperCase()
-            
-            const fClean = fUpper.replace(/[\s\-\/®™©]/g, '')
-            const codeClean = codeUpper.replace(/[\s\-\/®™©]/g, '')
-            
-            return fClean.includes(codeClean)
-          })
-          
-          if (familyMatches.length > 0) {
-            console.log(`  ✅ Found ${familyMatches.length} family matches for ${code}:`, familyMatches)
-            
-            const { data, error } = await supabase
-              .from('coatings')
-              .select('*')
-              .in('family', familyMatches)
-              .limit(50)
-            
-            if (error) {
-              console.error(`  ❌ Database error for ${code}:`, error)
-              return { code, products: [] }
-            }
-            
-            if (data && data.length > 0) {
-              console.log(`  ✅ Found ${data.length} products for ${code}`)
-              return { code, products: [data[0]] }
-            }
-          }
-          
-          const searchPatterns = [code, code.replace(/\s+/g, ''), code.replace(/\s+/g, '-')]
-          
-          const orConditions = searchPatterns.map(pattern => 
-            `Product_Name.ilike.%${pattern}%,family.ilike.%${pattern}%`
-          ).join(',')
-          
-          const { data, error } = await supabase
-            .from('coatings')
-            .select('*')
-            .or(orConditions)
-            .limit(100)
-          
-          if (error) {
-            console.error(`  ❌ Database error for ${code}:`, error)
-            return { code, products: [] }
-          }
-          
-          if (data && data.length > 0) {
-            console.log(`  ✅ Found ${data.length} products for ${code}`)
-            return { code, products: [data[0]] }
-          }
-          
-          console.log(`  ❌ No products found for ${code}`)
-          return { code, products: [] }
-        })
-      )
-      
-      const allMatchedProducts: ProductRecord[] = []
-      const notFound: string[] = []
-      
-      productMatches.forEach(match => {
-        if (match.products.length > 0) {
-          allMatchedProducts.push(cleanProductData(match.products[0]))
-          console.log(`  ✅ Added ${match.code}: ${match.products[0].Product_Name}`)
-        } else {
-          notFound.push(match.code)
-          console.log(`  ❌ No match for ${match.code}`)
-        }
-      })
-      
-      console.log(`✅ Total matched products: ${allMatchedProducts.length}`)
-      
-      if (allMatchedProducts.length < 2) {
-        return NextResponse.json({
-          success: false,
-          error: `Could not find enough products to compare. Found ${allMatchedProducts.length} of ${comparison.productCodes.length} requested.`,
-          results: allMatchedProducts,
-          count: allMatchedProducts.length,
-          notFound: notFound.length > 0 ? notFound : undefined
-        })
-      }
-      
-      const analysis = await generateComparisonAnalysis(allMatchedProducts, query)
-      
-      return NextResponse.json({
-        success: true,
-        questionType: 'comparison',
-        summary: analysis,
-        aiAnswer: analysis,
-        results: allMatchedProducts,
-        count: allMatchedProducts.length,
-        notFound: notFound.length > 0 ? notFound : undefined
-      })
-    }
-
-    // ============================================================================
-    // HANDLE REGULAR SEARCH QUERIES
-    // ============================================================================
-
-    const intent = detectSearchIntent(query)
     console.log(`🎯 Intent: ${intent.intent} (${intent.confidence})`)
 
-    // Try exact match first (for SKU or specific product codes)
+    if (comparison.isComparison) {
+      console.log('🔍 Comparison detection summary:')
+      console.log(`   - Product codes found: ${comparison.productCodes.length}`, comparison.productCodes)
+      console.log(`   - Potential SKUs found: ${comparison.potentialSkus.length}`, comparison.potentialSkus)
+    } else {
+      console.log('ℹ️ Not detected as comparison query')
+    }
+
+    // ============================================================================
+    // STEP 2: COMPARISON QUERIES (HIGHEST PRIORITY)
+    // ============================================================================
+
+    console.log('🔍 Checking for comparison patterns...')
+
+    // Pattern-based detection (simple regex patterns)
+    const comparisonPatterns = [
+      /compare\s+([a-z0-9\-]+)\s+(?:to|vs|versus|and|with)\s+([a-z0-9\-]+)/i,
+      /([a-z0-9\-]+)\s+vs\s+([a-z0-9\-]+)/i,
+      /difference between\s+([a-z0-9\-]+)\s+and\s+([a-z0-9\-]+)/i
+    ]
+
+    for (const pattern of comparisonPatterns) {
+      const match = query.match(pattern)
+      if (match) {
+        const productCodes = [match[1], match[2]]
+        console.log('🎯 Detected comparison query via pattern')
+        console.log('🎯 Product codes:', productCodes)
+        return await handleComparisonQuery(query, productCodes)
+      }
+    }
+
+    // Extraction-based detection
+    if (comparison.isComparison && comparison.productCodes.length >= 2) {
+      console.log('🎯 Detected comparison query via extraction')
+      console.log('🎯 Product codes:', comparison.productCodes)
+      return await handleComparisonQuery(query, comparison.productCodes)
+    }
+
+    if (comparison.isComparison && comparison.potentialSkus.length >= 2) {
+      console.log('🎯 Detected SKU comparison query')
+      console.log('🎯 SKUs:', comparison.potentialSkus)
+      return await handleSKUComparisonQuery(query, comparison.potentialSkus)
+    }
+
+    // ============================================================================
+    // STEP 3: EXACT MATCH SEARCH
+    // ============================================================================
+
     if (!comparison.isComparison) {
       const bestMatch = await findBestMatch(query)
 
@@ -1952,15 +2207,12 @@ export async function POST(request: NextRequest) {
           console.log(`✅ Found ${matchedProducts.length} products via exact match`)
           
           let cleanedProducts = matchedProducts.map(cleanProductData)
-          
-          // Diversify results
           let diversifiedResults = diversifyByFamily(cleanedProducts, Infinity, 500)
           
-          // Score and sort
-			diversifiedResults = diversifiedResults.map((p, index) => ({
-			  ...p,
-			  _relevanceScore: scoreProductRelevance(p, expandedTerms, index === 0) // ✅ Only debug first product
-			}))
+          diversifiedResults = diversifiedResults.map((p, index) => ({
+            ...p,
+            _relevanceScore: scoreProductRelevance(p, expandedTerms, index === 0)
+          }))
 
           diversifiedResults.sort((a, b) => (b._relevanceScore || 0) - (a._relevanceScore || 0))
 
@@ -1970,6 +2222,35 @@ export async function POST(request: NextRequest) {
               .match(/\b([A-Z]{2,}\s*\d+[A-Z]?)/i)?.[0] || '?'
             console.log(`  ${i + 1}. [${baseCode}] ${p.Product_Name} (score: ${p._relevanceScore})`)
           })
+
+          // ✅ Fallback comparison check
+          if (query.toLowerCase().includes('compare') && diversifiedResults.length >= 2) {
+            console.log('🎯 Fallback comparison: Detected comparison intent')
+            
+            const topProducts = diversifiedResults.slice(0, Math.min(10, diversifiedResults.length))
+            const comparisonAnalysis = await generateComparisonAnalysis(topProducts, query)
+            
+			  return NextResponse.json({
+				success: true,
+				questionType: 'comparison',
+				intent: 'comparison',
+				comparison: {
+				  products: topProducts,
+				  summary: comparisonAnalysis,
+				  comparedFields: getComparedFields(topProducts, true),  
+				  allFields: getComparedFields(topProducts, false) 
+				},
+				summary: comparisonAnalysis,
+				aiAnswer: comparisonAnalysis,
+				results: topProducts,
+				totalResults: topProducts.length,
+				displayedResults: topProducts.length,
+				count: topProducts.length,
+				matchedField: bestMatch.field,
+				matchedValue: bestMatch.value,
+				confidence: bestMatch.confidence
+			  })
+			}
 
           const summary = await generateAISummary(query, diversifiedResults)
 
@@ -1999,20 +2280,15 @@ export async function POST(request: NextRequest) {
     let results: any[] = []
     
     try {
-      // Try semantic search first
       results = await semanticSearch(query, 150)
       
       if (results.length > 0) {
         console.log(`✅ Semantic search returned ${results.length} results`)
         
-        // Clean products
         let cleanedProducts = results.map(cleanProductData)
         
-        // Diversify by family
         let diversifiedResults = diversifyByFamily(cleanedProducts, 20, 100)
         
-        // Score and sort by relevance
-        const expandedTerms = expandSearchTerms(query)
         diversifiedResults = diversifiedResults.map(p => ({
           ...p,
           _relevanceScore: scoreProductRelevance(p, expandedTerms)
@@ -2050,13 +2326,11 @@ export async function POST(request: NextRequest) {
     // ============================================================================
     
     console.log('🔍 Falling back to traditional search...')
-    const expandedTerms = expandSearchTerms(query)
     console.log(`🔄 Expanded terms:`, expandedTerms)
 
     let allResults: any[] = []
     const searchTerms = expandedTerms.slice(0, 40)
 
-    // Search by Product_Type
     const typeQuery = supabase
       .from('coatings')
       .select('*')
@@ -2067,7 +2341,6 @@ export async function POST(request: NextRequest) {
 
     if (typeData) allResults.push(...typeData)
 
-    // If we found products by type, also search by their families
     if (typeData && typeData.length > 0) {
       const uniqueFamilies = [...new Set(typeData.map(p => p.family).filter(Boolean))]
       console.log(`  📋 Found ${uniqueFamilies.length} unique families:`, uniqueFamilies.slice(0, 10))
@@ -2085,7 +2358,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Search by Product_Name
     const nameQuery = supabase
       .from('coatings')
       .select('*')
@@ -2096,7 +2368,6 @@ export async function POST(request: NextRequest) {
 
     if (nameData) allResults.push(...nameData)
 
-    // Search by Description
     const descQuery = supabase
       .from('coatings')
       .select('*')
@@ -2107,7 +2378,6 @@ export async function POST(request: NextRequest) {
 
     if (descData) allResults.push(...descData)
 
-    // Search by SKU
     const skuQuery = supabase
       .from('coatings')
       .select('*')
@@ -2118,7 +2388,6 @@ export async function POST(request: NextRequest) {
 
     if (skuData) allResults.push(...skuData)
 
-    // Remove duplicates
     const uniqueMap = new Map<string, any>()
 
     allResults.forEach(product => {
@@ -2143,13 +2412,10 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Diversify by family
     let diversifiedResults = diversifyByFamily(uniqueResults, Infinity, 500)
 
-    // Clean products
     diversifiedResults = diversifiedResults.map(cleanProductData)
 
-    // Score and sort
     diversifiedResults = diversifiedResults.map(p => ({
       ...p,
       _relevanceScore: scoreProductRelevance(p, expandedTerms)
@@ -2205,6 +2471,7 @@ export async function GET(request: NextRequest) {
       'Traditional keyword search fallback',
       'Product comparison',
       'Meta-question handling',
+      'SKU analysis (missing/duplicate)',
       'Filter options',
       'AI-powered summaries',
       'Family-based diversification'
