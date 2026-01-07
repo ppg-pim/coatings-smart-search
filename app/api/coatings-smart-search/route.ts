@@ -1715,14 +1715,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Check for meta-questions first
-    const metaType = detectMetaQuestion(query)
-    if (metaType) {
-      console.log(`🎯 Detected meta-question type: ${metaType}`)
-      const result = await handleMetaQuestion(metaType, query, filters)
-      if (result) {
-        return NextResponse.json(result)
-      }
-    }
+	const metaQuestion = detectMetaQuestion(query)
+	if (metaQuestion.isMeta && metaQuestion.type) {
+	  console.log(`🎯 Detected meta-question type: ${metaQuestion.type}`)
+	  const result = await handleMetaQuestion(metaQuestion.type, query, filters)
+	  if (result) {
+		return NextResponse.json(result)
+	  }
+	}
 	
     // Handle meta questions
     const metaCheck = detectMetaQuestion(query)
