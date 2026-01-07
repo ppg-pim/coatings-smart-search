@@ -178,103 +178,135 @@ export default function CoatingsPage() {
     return html;
   }
 
-  const loadFilterOptionsInline = async () => {
-    setLoadingFilters(true)
-    try {
-      const response = await fetch('/api/coatings-smart-search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          query: '__GET_FILTER_OPTIONS__',
-          getFilterOptions: true
-        }),
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        if (data.filterOptions) {
-          setFamilyOptions(data.filterOptions.families || [])
-          setProductTypeOptions(data.filterOptions.productTypes || [])
-          setProductModelOptions(data.filterOptions.productModels || [])
-          console.log('✅ Loaded coatings filter options:', data.filterOptions)
-        }
-      } else {
-        console.error('Failed to load coatings filter options:', response.status)
-      }
-    } catch (err) {
-      console.error('Failed to load coatings filter options:', err)
-    } finally {
-      setLoadingFilters(false)
-    }
-  }
+	const loadFilterOptionsInline = async () => {
+	  console.log('🔄 Loading filter options...')
+	  setLoadingFilters(true)
+	  
+	  try {
+		const response = await fetch('/api/coatings-smart-search', {
+		  method: 'POST',
+		  headers: { 'Content-Type': 'application/json' },
+		  body: JSON.stringify({ 
+			query: '__GET_FILTER_OPTIONS__',
+			getFilterOptions: true 
+		  })
+		})
 
-  const handleSearch = async () => {
-    if (!query.trim()) {
-      setError('Please enter a search query')
-      return
-    }
+		console.log('📡 Filter options response status:', response.status)
 
-    setLoading(true)
-    setError('')
-    setResults([])
-    setAiAnswer('')
-    setSearchIntent('')
-    setSpecificAnswer(null)
-    setComparisonData(null)
-    setAnalyticalData(null)
-    setMetaQuestionData(null)
-    setHasSearched(true)
-    setSearchProgress('Analyzing query...')
-    
-    const startTime = Date.now()
+		if (response.ok) {
+		  const data = await response.json()
+		  console.log('📦 Filter options data received:', {
+			success: data.success,
+			familyCount: data.filterOptions?.families?.length,
+			typeCount: data.filterOptions?.productTypes?.length,
+			modelCount: data.filterOptions?.productModels?.length
+		  })
+		  
+		  if (data.success && data.filterOptions) {
+			console.log('✅ Setting filter options in state')
+			setFamilyOptions(data.filterOptions.families || [])
+			setProductTypeOptions(data.filterOptions.productTypes || [])
+			setProductModelOptions(data.filterOptions.productModels || [])
+			
+			console.log('✅ Filter options loaded successfully:', {
+			  families: data.filterOptions.families?.length || 0,
+			  types: data.filterOptions.productTypes?.length || 0,
+			  models: data.filterOptions.productModels?.length || 0
+			})
+		  } else {
+			console.error('❌ Invalid response structure:', data)
+			setError('Failed to load filter options: Invalid response')
+		  }
+		} else {
+		  const errorText = await response.text()
+		  console.error('❌ Failed to load filter options:', response.status, errorText)
+		  setError(`Failed to load filter options: ${response.status}`)
+		}
+	  } catch (err: any) {
+		console.error('❌ Exception loading filter options:', err)
+		setError(`Failed to load filter options: ${err.message}`)
+	  } finally {
+		setLoadingFilters(false)
+	  }
+	}
 
-    try {
-      const response = await fetch('/api/coatings-smart-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: query.trim(),
-          filters: {
-            family: selectedFamily,
-            productType: selectedProductType,
-            productModel: selectedProductModel
-          }
-        })
-      })
+	const handleSearch = async () => {
+	  setLoading(true)
+	  setError('')
+	  setHasSearched(true)
+	  setResults([])
+	  setAiAnswer('')
+	  setSpecificAnswer(null)
+	  setComparisonData(null)
+	  setAnalyticalData(null)
+	  setMetaQuestionData(null)
+	  
+	  const startTime = Date.now()
 
-      const data = await response.json()
+	  try {
+		const response = await fetch('/api/coatings-smart-search', {
+		  method: 'POST',
+		  headers: { 'Content-Type': 'application/json' },
+		  body: JSON.stringify({
+			query,
+			filters: {
+			  family: selectedFamily,
+			  productType: selectedProductType,
+			  productModel: selectedProductModel
+			}
+		  })
+		})
 
-      // 🔍 DEBUG - Remove after testing
-      console.log('🔍 Full Response:', data)
-      console.log('✨ AI Answer exists?', !!data.answer)
-      console.log('✨ AI Answer length:', data.answer?.length)
-      console.log('✨ AI Answer preview:', data.answer?.substring(0, 200))
+		if (!response.ok) {
+		  throw new Error(`HTTP error! status: ${response.status}`)
+		}
 
-      if (data.success) {
-        setResults(data.products || [])
-        setAiAnswer(data.answer || '')
-        setSearchIntent(data.intent || '')
-        
-        const endTime = Date.now()
-        setSearchTime((endTime - startTime) / 1000)
-        
-        console.log('✅ Search completed')
-        console.log('📊 Products:', data.products?.length)
-        console.log('✨ AI Answer:', data.answer?.substring(0, 100) + '...')
-        console.log('🎯 Intent:', data.intent)
-      } else {
-        setError(data.error || 'Search failed')
-      }
-    } catch (err: any) {
-      console.error('Search error:', err)
-      setError(err.message || 'An error occurred')
-    } finally {
-      setLoading(false)
-      setSearchProgress('')
-    }
-  }
+		const data = await response.json()
+		
+		// 🔍 DEBUG
+		console.log('🔍 Full API Response:', data)
+		console.log('🔍 Results:', data.results)
+		console.log('🔍 Results count:', data.results?.length || 0)
+
+		const endTime = Date.now()
+		setSearchTime((endTime - startTime) / 1000)
+
+		// ✅ Handle different response structures
+		if (data.metaQuestion) {
+		  setMetaQuestionData(data.metaQuestion)
+		  setResults([])
+		} else if (data.specificAnswer) {
+		  setSpecificAnswer(data.specificAnswer)
+		  setResults(data.results || [])
+		} else if (data.comparison) {
+		  setComparisonData(data.comparison)
+		  setResults(data.results || [])
+		} else if (data.analytical) {
+		  setAnalyticalData(data.analytical)
+		  setResults(data.results || [])
+		} else {
+		  // Normal search results
+		  setResults(data.results || [])
+		}
+
+		// Set AI answer if available
+		if (data.aiAnswer) {
+		  setAiAnswer(data.aiAnswer)
+		}
+		
+		// Set search intent
+		if (data.intent) {
+		  setSearchIntent(data.intent)
+		}
+
+	  } catch (err: any) {
+		console.error('❌ Search error:', err)
+		setError(err.message || 'An error occurred during search')
+	  } finally {
+		setLoading(false)
+	  }
+	}
 
   const fetchFilteredProducts = async (filter: { filterType: string; filterValue: string }) => {
     try {
